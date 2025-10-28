@@ -28,9 +28,10 @@ Folder /png_slam_data przechodzi jeden do jeden z katalogu na host. Za jego pomo
 Bardzo ważne jest, żeby się upewnić czy pliki są w odpowiednim miejscu i czy są poprawne. Kod oczekuje pliku timestamp.txt w formacie:
 
 timestamp               nazwa pliku
-1625124364.469731000	000153
-1625124364.569781000	000154
-1625124364.669704000	000155
+
+1625124364.469731000    000153
+1625124364.569781000    000154
+1625124364.669704000    000155
 
 oraz folderu /left_images z plikami .png, jak będzie stereo to również /right_images
 
