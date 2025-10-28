@@ -93,6 +93,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
@@ -220,6 +221,29 @@ install(TARGETS
   ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}
   INCLUDES DESTINATION include
+)
+
+add_executable(FEEDER_PNG src/feeder_png.cpp)
+
+ament_target_dependencies(FEEDER_PNG
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+target_include_directories(FEEDER_PNG
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(FEEDER_PNG
+  ${OpenCV_LIBRARIES}
+)
+
+install(TARGETS
+  FEEDER_PNG
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()
