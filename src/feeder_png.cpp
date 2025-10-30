@@ -5,26 +5,46 @@
 #include <fstream>
 #include <sstream>
 
-class FEEDER_PNG : public rclcpp::Node
+class feeder_png : public rclcpp::Node
 {
 public:
-    FEEDER_PNG();
-    void test();
-    
+    feeder_png(const std::string& data_folder);
+    void send_photo_data();
+
 private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_left_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_right_;
+    std::ifstream time_stamps;
+    std::string images_folder_;
     
     sensor_msgs::msg::Image createImageMsg(const cv::Mat& img, const rclcpp::Time& timestamp);
 };
 
-FEEDER_PNG::FEEDER_PNG() : Node("feeder_obrazow_png")
+feeder_png::feeder_png(const std::string& data_folder) : Node("feeder_obrazow_png")
 {
     image_publisher_left_ = this->create_publisher<sensor_msgs::msg::Image>("image_left_raw_data", 10);
     image_publisher_right_ = this->create_publisher<sensor_msgs::msg::Image>("image_right_raw_data", 10);
+    
+    std::string folder = data_folder;
+    if (!folder.empty() && folder.back() == '/') {
+        folder.pop_back();
+    }
+
+    images_folder_ = folder + "/left_images/";
+    
+    std::string timestamp_file = folder + "/timestamp.txt";
+    time_stamps.open(timestamp_file);
+    
+    if (!time_stamps.is_open()) {
+        RCLCPP_ERROR(this->get_logger(), "Cannot open file: %s", timestamp_file.c_str());
+        throw std::runtime_error("Failed to open timestamp file");
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "Loaded timestamps from: %s", timestamp_file.c_str());
+    RCLCPP_INFO(this->get_logger(), "Images folder: %s", images_folder_.c_str());
 }
 
-sensor_msgs::msg::Image FEEDER_PNG::createImageMsg(const cv::Mat& img, const rclcpp::Time& timestamp)
+sensor_msgs::msg::Image feeder_png::createImageMsg(const cv::Mat& img, const rclcpp::Time& timestamp)
 {
     auto msg = sensor_msgs::msg::Image();
     msg.header.stamp = timestamp;
@@ -51,17 +71,7 @@ sensor_msgs::msg::Image FEEDER_PNG::createImageMsg(const cv::Mat& img, const rcl
     return msg;
 }
 
-void FEEDER_PNG::test() {
-    std::ifstream time_stamps("/ws/png_SLAM_data/timestamp.txt");
-    
-    if (!time_stamps.is_open()) {
-        RCLCPP_ERROR(this->get_logger(), "Nie można otworzyć timestamp.txt");
-        return;
-    }
-    
-    RCLCPP_INFO(this->get_logger(), "Czekam 2 sekundy na uruchomienie subskrybentów...");
-    rclcpp::sleep_for(std::chrono::seconds(2));
-    
+void feeder_png::send_photo_data() {
     std::string line;
     int frame_count = 0;
     
@@ -92,12 +102,12 @@ void FEEDER_PNG::test() {
         // Użyj aktualnego czasu ROS + offset
         rclcpp::Time ros_timestamp = start_time + rclcpp::Duration::from_seconds(time_offset);
         
-        std::string left_photo_name = "/ws/png_SLAM_data/left_images/" + photo_name + ".png";
+        std::string left_photo_name = images_folder_ + photo_name + ".png";
         
         cv::Mat img_left = cv::imread(left_photo_name, cv::IMREAD_COLOR);
         
         if (img_left.empty()) {
-            RCLCPP_ERROR(this->get_logger(), "Nie można wczytać obrazu: %s", photo_name.c_str());
+            RCLCPP_ERROR(this->get_logger(), "Nie można wczytać obrazu: %s", left_photo_name.c_str());
             continue;
         }
         
@@ -106,7 +116,7 @@ void FEEDER_PNG::test() {
         cv::resize(img_left, img_resized, cv::Size(752, 480), 0, 0, cv::INTER_LINEAR);
         
         auto msg_left = createImageMsg(img_resized, ros_timestamp);
-        msg_left.header.frame_id = "cam0";  // WAŻNE: zmień na cam0
+        msg_left.header.frame_id = "cam0";
         
         image_publisher_left_->publish(msg_left);
         
@@ -119,7 +129,6 @@ void FEEDER_PNG::test() {
         
         // Zachowaj oryginalne odstępy czasowe między frame'ami
         if (frame_count > 1) {
-            // Następny timestamp - obecny timestamp = czas oczekiwania
             auto next_line_pos = time_stamps.tellg();
             std::string next_line;
             if (std::getline(time_stamps, next_line)) {
@@ -127,7 +136,7 @@ void FEEDER_PNG::test() {
                 double next_timestamp;
                 std::string next_photo;
                 if (next_iss >> next_timestamp >> next_photo) {
-                    double wait_time = (next_timestamp - timestamp_sec) * 1000.0; // ms
+                    double wait_time = (next_timestamp - timestamp_sec) * 1000.0;
                     if (wait_time > 0 && wait_time < 1000) {
                         rclcpp::sleep_for(std::chrono::milliseconds(static_cast<int>(wait_time)));
                     }
@@ -146,8 +155,31 @@ void FEEDER_PNG::test() {
 int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
-    auto feeder_png = std::make_shared<FEEDER_PNG>();
-    feeder_png->test();
+    
+    std::string data_folder;
+    
+    if (argc < 2) {
+        RCLCPP_INFO(rclcpp::get_logger("feeder"), 
+                    "Nie podano sciezki do folderu z danymi.\n"
+                    "Użycie: ros2 run ov2slam FEEDER_PNG /sciezka/do/folderu\n"
+                    "Folder powinien zawierać:\n"
+                    "  - timestamp.txt\n"
+                    "  - left_images/\n"
+                    "Używam domyślnej ścieżki: /ws/png_SLAM_data");
+        data_folder = "/ws/png_SLAM_data";
+    } else {
+        data_folder = argv[1];
+    }
+    
+    try {
+        auto feeder = std::make_shared<feeder_png>(data_folder);
+        feeder->send_photo_data();
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(rclcpp::get_logger("feeder"), "Error: %s", e.what());
+        rclcpp::shutdown();
+        return 1;
+    }
+    
     rclcpp::shutdown();
     return 0;
 }
