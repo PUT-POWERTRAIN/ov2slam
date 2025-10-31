@@ -26,9 +26,6 @@ Z wizualizacją:
     ov2slam-humble-amd64 \
     bash
 ```
-```
-    source /ws/install/setup.bash
-```
 Uruchomienie symulacji z pliku launch - data_path to argument który przyjmuje ścieżke do katalogu z katalogami left_images, right_images, plik_config.yaml, timestamp.txt, jeżeli argumenty nie będą podane to przyjmie ścieżkę /ws/png_SLAM_data,
 przyjmuje też argument czy ma uruchomić wizualizację RVIZ:
 ```
