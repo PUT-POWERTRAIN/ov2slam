@@ -217,6 +217,11 @@ if (lcdetector_FOUND)
   )
 endif (lcdetector_FOUND)
 
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 install(TARGETS
   ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}
@@ -243,6 +248,23 @@ target_link_libraries(FEEDER_PNG
 
 install(TARGETS
   FEEDER_PNG
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(GUI src/GUI.cpp)
+
+ament_target_dependencies(GUI
+  rclcpp
+  std_msgs
+)
+
+target_include_directories(GUI
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+)
+
+install(TARGETS
+  GUI
   DESTINATION lib/${PROJECT_NAME}
 )
 
