@@ -3,60 +3,21 @@ NOWY READE ME:
 Instalacja powinna się udać do dowolnego folderu bo próbowałem linkować wszystko względem katalogu roboczego, jednak w razie czego ja wszystko robiłem w katalogu głównym ~/
 Instalacja:
 ```
-    https://github.com/PUT-POWERTRAIN/ov2slam.git
+    git clone https://github.com/PUT-POWERTRAIN/ov2slam.git
 ```
 Budowanie:
 ```
     cd ov2slam
     docker build . -f docker/Dockerfile -t ov2slam-humble-amd64 --build-arg ROS_DISTRO=humble --build-arg ARCHITECTURE=amd64
 ```
-Uruchomienie docker:
-```
-    docker run -it --rm  ov2slam-humble-amd64 bash
-    source /ws/install/setup.bash
-```
-Do uruchomienia ov2slam potrzebny jest jeszcze plik konfiguracyjny .yaml, można go znaleźć poprzez funkcje (pamietaj, że ta funkcja przeszukuje tylko aktualny katalog i jego podkatalogi!
-```
-    find . -name ".yaml"
-```
-Uruchomienie ov2slam:
-```
-    ros2 run ov2slam ov2slam_node <CONFIG FILE>.yaml
-```
-Teraz SLAM czeka aż nadejdą paczki i zacznie je przetwarzać, domyślnie patrzy na ndoe /cam0/image_raw i /cam1/image_raw, więc jeśli chcesz przekazać mu inne parametry to zmodyfikuj plik /png_slam_data/custom_params.yaml. 
-Folder /png_slam_data przechodzi jeden do jeden z katalogu na host. Za jego pomocą można też wrzucać pliki do dockera bez konieczności kopiowania za każdym odpaleniem dockera. Umożliwia on także symulacje ze zdjęc .png
-Bardzo ważne jest, żeby się upewnić czy pliki są w odpowiednim miejscu i czy są poprawne. Kod oczekuje pliku timestamp.txt w formacie:
-
-| timestamp | nazwa pliku |
-| :--- | :--- |
-| 1625124364.469731000 | 000153 |
-| 1625124364.569781000 | 000154 |
-| 1625124364.669704000 | 000155 |
-
-oraz folderu /left_images z plikami .png, jak będzie stereo to również /right_images
-
-UWAGA!! STEREO JESZCZE NIE JEST DODANE
-
-Uruchomienie własnej paczki zdjęc z .png o szablonie opisanym wyżej:
+Uruchomienie docker, na dwa sposoby - bez wizualizacji:
 ```
     docker run -it --rm  ov2slam-humble-amd64 bash
 ```
+Z wizualizacją:
+```
+    xhost si:localuser:root
 
-Lub dołączenie do istniejącego docker:
-```
-    docker exec -it <CONTAINER ID> bash
-```
-```
-    source /ws/install/setup.bash
-    ros2 run ov2slam FEEDER_PNG
-```
-
-Jeśli chcesz uruchomić z pliku bag (ros2):
-```
-    ros2 bag play bag_file_name.db3
-```
-Uruchomienie wizualizacji rviz wymaga przekazania ekranu do docker:
-```
     docker run -it --rm \
     --device=/dev/video0:/dev/video0 \
     --env="DISPLAY=$DISPLAY" \
@@ -65,19 +26,27 @@ Uruchomienie wizualizacji rviz wymaga przekazania ekranu do docker:
     ov2slam-humble-amd64 \
     bash
 ```
-
-Czasami wymagane jest jeszcze problem z permissions X11:
-```
-    xhost si:localuser:root
-```
-
-Uruchomienie rviz:
 ```
     source /ws/install/setup.bash
-    ros2 run rviz2 rviz2 -d src/ov2slam/ov2slam_visualization.rviz
 ```
+Uruchomienie symulacji z pliku launch - data_path to argument który przyjmuje ścieżke do katalogu z katalogami left_images, right_images, plik_config.yaml, timestamp.txt, jeżeli argumenty nie będą podane to przyjmie ścieżkę /ws/png_SLAM_data,
+przyjmuje też argument czy ma uruchomić wizualizację RVIZ:
+```
+    source /ws/install/setup.bash
+    
+    ros2 launch ov2slam start_simulation.launch.py \
+    data_path:=/ws/png_SLAM_data \
+    enable_rviz:=false
+```
+Kod oczekuje pliku timestamp.txt w formacie:
 
-UWAGA!! ov2slam, feeder danych i wizualizacja musi być na osobnych terminalach. 
+| timestamp | nazwa pliku |
+| :--- | :--- |
+| 1625124364.469731000 | 000153 |
+| 1625124364.569781000 | 000154 |
+| 1625124364.669704000 | 000155 |
+
+
 
 
 
