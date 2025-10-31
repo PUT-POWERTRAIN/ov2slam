@@ -1,3 +1,53 @@
+NOWY READE ME:
+
+Instalacja powinna się udać do dowolnego folderu bo próbowałem linkować wszystko względem katalogu roboczego, jednak w razie czego ja wszystko robiłem w katalogu głównym ~/
+Instalacja:
+```
+    git clone https://github.com/PUT-POWERTRAIN/ov2slam.git
+```
+Budowanie:
+```
+    cd ov2slam
+    docker build . -f docker/Dockerfile -t ov2slam-humble-amd64 --build-arg ROS_DISTRO=humble --build-arg ARCHITECTURE=amd64
+```
+Uruchomienie docker, na dwa sposoby - bez wizualizacji:
+```
+    docker run -it --rm  ov2slam-humble-amd64 bash
+```
+Z wizualizacją:
+```
+    xhost si:localuser:root
+
+    docker run -it --rm \
+    --device=/dev/video0:/dev/video0 \
+    --env="DISPLAY=$DISPLAY" \
+    --env="QT_X11_NO_MITSHM=1" \
+    --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
+    ov2slam-humble-amd64 \
+    bash
+```
+Uruchomienie symulacji z pliku launch - data_path to argument który przyjmuje ścieżke do katalogu z katalogami left_images, right_images, plik_config.yaml, timestamp.txt, jeżeli argumenty nie będą podane to przyjmie ścieżkę /ws/png_SLAM_data,
+przyjmuje też argument czy ma uruchomić wizualizację RVIZ:
+```
+    source /ws/install/setup.bash
+    
+    ros2 launch ov2slam start_simulation.launch.py \
+    data_path:=/ws/png_SLAM_data \
+    enable_rviz:=false
+```
+Kod oczekuje pliku timestamp.txt w formacie:
+
+| timestamp | nazwa pliku |
+| :--- | :--- |
+| 1625124364.469731000 | 000153 |
+| 1625124364.569781000 | 000154 |
+| 1625124364.669704000 | 000155 |
+
+
+
+
+
+ORGINALNY READ ME:
 # OV²SLAM
 ## A Fully Online and Versatile Visual SLAM for Real-Time Applications
 
