@@ -26,14 +26,25 @@ Z wizualizacją:
     ov2slam-humble-amd64 \
     bash
 ```
-Uruchomienie symulacji z pliku launch - data_path to argument który przyjmuje ścieżke do katalogu z katalogami left_images, right_images, plik_config.yaml, timestamp.txt, jeżeli argumenty nie będą podane to przyjmie ścieżkę /ws/png_SLAM_data,
-przyjmuje też argument czy ma uruchomić wizualizację RVIZ:
+Uruchomienie symulacji z pliku launch: 
 ```
-    source /ws/install/setup.bash
+  source /ws/install/setup.bash
     
-    ros2 launch ov2slam start_simulation.launch.py \
-    data_path:=/ws/png_SLAM_data \
-    enable_rviz:=false
+  ros2 launch ov2slam start_simulation.launch.py \
+  images_folder:=/sciezka/do/folderu/zdjec \
+  timestamp_path:=/sciezka/do/timestamp.txt \
+  params_file:=/sciezka/do/config.yaml \
+  use_sim_time_arg:=false \
+  enable_rviz_arg:=true
+```
+Jeśli argmenty nie zostaną podane to zacznie pobierać ze scieżki domyślnej:
+```
+/ws/ -|
+      |- /left_images/ -|
+      |                 | zdjecia.png
+      |
+      |- custom_params.yaml
+      |- timestamp.txt
 ```
 Kod oczekuje pliku timestamp.txt w formacie:
 
@@ -43,6 +54,13 @@ Kod oczekuje pliku timestamp.txt w formacie:
 | 1625124364.569781000 | 000154 |
 | 1625124364.669704000 | 000155 |
 
+Feeder można też uruchomić ręcznie za pomocą:
+```
+ros2 run ov2slam feeder_png --ros-args \
+  -p images_folder:=/sciezka/do/zdjec \
+  -p timestamp_path:=/sciezka/do/timestamp.txt
+```
+Również jak argumenty nie zostaną podane to zacznie pobierać ze ścieżki domyślnej, patrz wyżej.
 
 
 
