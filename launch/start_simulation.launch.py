@@ -1,18 +1,28 @@
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
-import launch.conditions
-
 
 def generate_launch_description():
     # Deklaracja argumentów launch
     params_file_arg = DeclareLaunchArgument(
         'params_file',
         default_value='/ws/png_SLAM_data/custom_params.yaml',
-        description='Path to the parameters YAML file'
+        description='Path to the parameters YAML file for OV2SLAM'
+    )
+    
+    images_folder_arg = DeclareLaunchArgument(
+        'images_folder',
+        default_value='/ws/png_SLAM_data/left_images',
+        description='Path to the folder with PNG images'
+    )
+    
+    timestamp_path_arg = DeclareLaunchArgument(
+        'timestamp_path',
+        default_value='/ws/png_SLAM_data/timestamp.txt',
+        description='Path to the timestamp.txt file'
     )
     
     rviz_config_arg = DeclareLaunchArgument(
@@ -21,16 +31,11 @@ def generate_launch_description():
         description='Path to RViz configuration file'
     )
     
+    # do ov2slam arg
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',
         description='Use simulation time'
-    )
-    
-    data_path_arg = DeclareLaunchArgument(
-        'data_path',
-        default_value='/ws/png_SLAM_data',
-        description='Path to PNG SLAM data directory'
     )
     
     enable_rviz_arg = DeclareLaunchArgument(
@@ -41,9 +46,10 @@ def generate_launch_description():
     
     # Konfiguracja
     params_file = LaunchConfiguration('params_file')
+    images_folder = LaunchConfiguration('images_folder')
+    timestamp_path = LaunchConfiguration('timestamp_path')
     rviz_config = LaunchConfiguration('rviz_config')
     use_sim_time = LaunchConfiguration('use_sim_time')
-    data_path = LaunchConfiguration('data_path')
     enable_rviz = LaunchConfiguration('enable_rviz')
     
     # Node: OV2SLAM
@@ -62,16 +68,18 @@ def generate_launch_description():
         sigkill_timeout='15',
     )
     
-    # Node: FEEDER_PNG z ExecuteProcess dla poprawnego przekazania argumentu
-    # Używamy ExecuteProcess zamiast Node, bo Node automatycznie dodaje --ros-args
-    # co powoduje problem: argv[1] staje się "--ros-args" zamiast ścieżką
-    feeder_png_process = ExecuteProcess(
-        cmd=[
-            '/ws/install/ov2slam/lib/ov2slam/FEEDER_PNG',
-            data_path  # argv[1] - ścieżka do folderu
-        ],
+    # Node: FEEDER_PNG z parametrami ROS2
+    feeder_png_node = Node(
+        package='ov2slam',
+        executable='feeder_png',
+        name='feeder_png',
         output='screen',
-        shell=False,
+        parameters=[{
+            'images_folder': images_folder,
+            'timestamp_path': timestamp_path,
+            'use_sim_time': use_sim_time,
+        }],
+        respawn=False,
         emulate_tty=True,
     )
     
@@ -86,7 +94,6 @@ def generate_launch_description():
             'use_sim_time': use_sim_time,
         }],
         respawn=False,
-        # Software rendering dla Dockera bez GPU
         additional_env={'LIBGL_ALWAYS_SOFTWARE': '1'},
         condition=IfCondition(enable_rviz),
     )
@@ -94,7 +101,7 @@ def generate_launch_description():
     # Opóźnij start FEEDER_PNG o 3 sekundy (aby ov2slam był gotowy)
     delayed_feeder = TimerAction(
         period=3.0,
-        actions=[feeder_png_process]
+        actions=[feeder_png_node]
     )
     
     # Opóźnij start RViz o 2 sekundy
@@ -106,9 +113,10 @@ def generate_launch_description():
     return LaunchDescription([
         # Argumenty
         params_file_arg,
+        images_folder_arg,
+        timestamp_path_arg,
         rviz_config_arg,
         use_sim_time_arg,
-        data_path_arg,
         enable_rviz_arg,
         
         # Nodes (w kolejności)
