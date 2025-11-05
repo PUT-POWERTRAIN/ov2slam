@@ -1,10 +1,13 @@
-NOWY READE ME:
-
-Instalacja powinna się udać do dowolnego folderu bo próbowałem linkować wszystko względem katalogu roboczego, jednak w razie czego ja wszystko robiłem w katalogu głównym ~/
 Instalacja:
 ```
     git clone https://github.com/PUT-POWERTRAIN/ov2slam.git
 ```
+Data set canal pohang można pobrać ze strony: https://sites.google.com/view/pohang-canal-dataset/home. Główny plik ma 100GB, ale na szczęście udostępnili próbki po 3GB w zakładce Samples. Folder ze zdjęciami można skopiować od dockera ręcznie przez komendę (rozwiązanie tymczasowe, jak docker zostanie zamknięty, pliki znikną):
+```
+docker cp ...
+```
+Lub umieścić w folderze png_slam_data przed zbudowaniem, lub zbudować jeszcze raz. Folder jest przenoszony do środka dockera.  
+
 Budowanie:
 ```
     cd ov2slam
@@ -26,7 +29,7 @@ Z wizualizacją:
     ov2slam-humble-amd64 \
     bash
 ```
-Uruchomienie symulacji z pliku launch: 
+Następnie uruchomienie symulacji z pliku launch w środku dockera: 
 ```
   source /ws/install/setup.bash
     
@@ -39,14 +42,19 @@ Uruchomienie symulacji z pliku launch:
 ```
 Jeśli argmenty nie zostaną podane to zacznie pobierać ze scieżki domyślnej:
 ```
-/ws/ -|
-      |- /left_images/ -|
-      |                 | zdjecia.png
-      |
-      |- custom_params.yaml
-      |- timestamp.txt
+/ws/png_SLAM_data/left_images
+/ws/png_SLAM_data/timestamp.txt
+/ws/png_SLAM_data/custom_params.yaml
 ```
-Kod oczekuje pliku timestamp.txt w formacie:
+```
+/ws/png_SLAM_data/ -|
+                    |- /left_images/ -|
+                    |                 | zdjecia.png
+                    |
+                    |- custom_params.yaml
+                    |- timestamp.txt
+```
+Kod oczekuje pliku timestamp.txt w formacie [timestamp] spacja [nazwa pliku]:
 
 | timestamp | nazwa pliku |
 | :--- | :--- |
@@ -54,7 +62,7 @@ Kod oczekuje pliku timestamp.txt w formacie:
 | 1625124364.569781000 | 000154 |
 | 1625124364.669704000 | 000155 |
 
-Feeder można też uruchomić ręcznie za pomocą:
+Feeder został zaimplementowany z myślą o dowolnym datasecie, jedyne co użytkownik musi zrobić to dostarczyć pełną ścieżkę do folderu ze zdjęciami i pliku timestamp, który spełnia wymagania opisane wyżej i zmienić parametry w pliku custom_params.yaml. Feeder można też uruchomić ręcznie za pomocą:
 ```
 ros2 run ov2slam feeder_png --ros-args \
   -p images_folder:=/sciezka/do/zdjec \
