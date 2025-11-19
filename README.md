@@ -1,3 +1,61 @@
+Instalacja:
+```
+    git clone https://github.com/PUT-POWERTRAIN/ov2slam.git
+```
+Data set canal pohang można pobrać ze strony: https://sites.google.com/view/pohang-canal-dataset/home. Główny plik ma 100GB, ale na szczęście udostępnili próbki po 3GB w zakładce Samples. Umieścić zdjęcia w folderze png_slam_data przed zbudowaniem. Folder jest przenoszony do środka dockera.   
+
+Lub folder ze zdjęciami można skopiować od dockera ręcznie przez komendę (rozwiązanie tymczasowe, jak docker zostanie zamknięty, pliki znikną):
+```
+    docker cp ...
+```
+Budowanie:
+```
+    cd ov2slam/docker
+    make build
+```
+Przed uruchomieniem należy wpisać poniższą komendę, żeby była możliwa wizualizacja:
+```
+    xhost +local:docker
+```
+Uruchomianie docker:
+```
+    make up
+```
+Uwaga, może przerwać budowanie lub w trakcie działania dockera z errorem 137, oznacza za mała pamięć RAM. W takim przypadku trzeba zwiększyć przeznaczoną pamięć na docker.
+
+W środku dockera:
+```
+    source /ws/install/setup.bash
+```
+Został utworzony plik launch, który uruchamia wszystkie potrzebne node do działania i przyjmuje poniższe argumetny, jeśli argumenty nie zostaną podane przyjmie wartości domyślne:
+
+| Argument | Opis | Wartość domyślna |
+| :--- | :--- | :--- |
+| images_folder_left | ścieżka do folderu ze zdjęciami lewej kamery stereo, lub zdjęciami mono | /ws/png_SLAM_data/left_images |
+| images_folder_right | ścieżka do folderu ze zdjęciami prawej kamery stereo, w trybie mono nie jest używany | /ws/png_SLAM_data/right_images |
+| enable_stereo | false - symulacja w trybie mono, true - symulacja w trybie stereo | true |
+| timestamp_path | ścieżka do pliku timestamp.txt | /ws/png_SLAM_data/timestamp.txt |
+| params_file | ścieżka do pliku configuracyjnego .yaml do ov2slam | /ws/png_SLAM_data/custom_params.yaml |
+| enable_rviz | false - symulacja bez wizualizacji, true - symulacja z wizualizacją | true |
+
+Kod oczekuje pliku timestamp.txt w formacie [timestamp] spacja [nazwa pliku]:
+
+| timestamp | nazwa pliku |
+| :--- | :--- |
+| 1625124364.469731000 | 000153 |
+| 1625124364.569781000 | 000154 |
+| 1625124364.669704000 | 000155 |
+
+Komenda do uruchamiania pliku launch:
+``` 
+    ros2 launch ov2slam start_simulation.launch.py
+```
+
+Feeder został zaimplementowany z myślą o dowolnym datasecie, jedyne co użytkownik musi zrobić to dostarczyć pełną ścieżkę do folderu ze zdjęciami i pliku timestamp, który spełnia wymagania opisane wyżej i zmienić parametry w pliku custom_params.yaml.
+
+
+
+ORGINALNY READ ME:
 # OV²SLAM
 ## A Fully Online and Versatile Visual SLAM for Real-Time Applications
 

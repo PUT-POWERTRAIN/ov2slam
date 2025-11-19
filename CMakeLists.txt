@@ -102,6 +102,7 @@ find_package(tf2_ros REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(backward_ros REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 ###########
 ## Build ##
@@ -217,10 +218,76 @@ if (lcdetector_FOUND)
   )
 endif (lcdetector_FOUND)
 
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 install(TARGETS
   ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}
   INCLUDES DESTINATION include
+)
+
+add_executable(feeder_png src/feeder_png.cpp)
+
+ament_target_dependencies(feeder_png
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+target_include_directories(feeder_png
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(feeder_png
+  ${OpenCV_LIBRARIES}
+)
+
+install(TARGETS
+  feeder_png
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(imu_transform src/imu_transform.cpp)
+
+ament_target_dependencies(imu_transform
+  rclcpp
+  tf2_msgs
+  geometry_msgs
+)
+
+target_include_directories(imu_transform
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+)
+
+install(TARGETS
+  imu_transform
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(occupancy_grid src/occupancy_grid.cpp)
+
+ament_target_dependencies(occupancy_grid
+  rclcpp
+  tf2_msgs
+  geometry_msgs
+  nav_msgs
+  sensor_msgs
+)
+
+target_include_directories(occupancy_grid
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+)
+
+install(TARGETS
+  occupancy_grid
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

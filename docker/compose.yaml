@@ -1,0 +1,29 @@
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: container-template:dev
+    working_dir: /work
+    entrypoint:
+      - /work/docker/scripts/dev-entrypoint.sh
+    env_file:
+      - .env
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      WAYLAND_DISPLAY: ${WAYLAND_DISPLAY:-}
+      XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR:-/tmp/.X11-unix}
+      QT_QPA_PLATFORM: ${QT_QPA_PLATFORM:-wayland}
+      QSG_RHI_BACKEND: ${QSG_RHI_BACKEND:-software}
+      DATASETS_ROOT: /datasets
+    volumes:
+      - ${HOST_REPO:-..}:/work
+      - ${HOST_DATASETS:-./datasets}:/datasets
+      - ${HOST_X11_SOCKET:-/tmp/.X11-unix}:/tmp/.X11-unix
+      - ${HOST_XDG_RUNTIME_DIR:-/tmp/.X11-unix}:${XDG_RUNTIME_DIR:-/tmp/.X11-unix}
+      - ${HOME}:/hosthome:ro
+    network_mode: host
+    tty: true
+    stdin_open: true
+    init: true
+    # command provided by entrypoint (exec bash -li)
