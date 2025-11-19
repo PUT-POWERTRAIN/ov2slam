@@ -12,7 +12,6 @@ public:
     feeder_png();
     void send_photo_data();
     bool loop_;
-    
 private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_left_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_right_;
