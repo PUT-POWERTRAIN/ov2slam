@@ -217,10 +217,38 @@ if (lcdetector_FOUND)
   )
 endif (lcdetector_FOUND)
 
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 install(TARGETS
   ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}
   INCLUDES DESTINATION include
+)
+
+add_executable(feeder_png src/feeder_png.cpp)
+
+ament_target_dependencies(feeder_png
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+target_include_directories(feeder_png
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(feeder_png
+  ${OpenCV_LIBRARIES}
+)
+
+install(TARGETS
+  feeder_png
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()
