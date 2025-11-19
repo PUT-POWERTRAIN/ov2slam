@@ -52,6 +52,11 @@ def generate_launch_description():
         default_value='true',
         description='true if loop on dataset'
     )
+    apply_gravity_correction_arg = DeclareLaunchArgument(
+        'apply_gravity_correction',
+        default_value='true',
+        description='true if enable feeder IMU corrcetion'
+    )
 
     # Konfiguracja
     params_file = LaunchConfiguration('params_file')
@@ -63,6 +68,8 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     enable_rviz = LaunchConfiguration('enable_rviz')
     loop = LaunchConfiguration('loop')
+    apply_gravity_correction = LaunchConfiguration('apply_gravity_correction')
+
 
     # Node: OV2SLAM
     ov2slam_node = Node(
@@ -98,6 +105,24 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    imu_transform_node = Node(
+        package='ov2slam',
+        executable='imu_transform',
+        name='imu_transform',
+        output='screen',
+        respawn=False,
+        emulate_tty=True,
+    )
+
+    occupancy_grid_node = Node(
+        package='ov2slam',
+        executable='occupancy_grid',
+        name='occupancy_grid',
+        output='screen',
+        respawn=False,
+        emulate_tty=True,
+    )
+
     # Node: RViz2 z software rendering dla Dockera
     rviz_node = Node(
         package='rviz2',
@@ -116,7 +141,7 @@ def generate_launch_description():
     # Opóźnij start FEEDER_PNG o 3 sekundy
     delayed_feeder = TimerAction(
         period=3.0,
-        actions=[feeder_png_node]
+        actions=[feeder_png_node, imu_transform_node, occupancy_grid_node]
     )
 
     # Opóźnij start RViz o 2 sekundy
@@ -141,6 +166,8 @@ def generate_launch_description():
         use_sim_time_arg,
         enable_rviz_arg,
         loop_arg,
+        apply_gravity_correction_arg,
+
         # Nodes
         ov2slam_node,
         delayed_rviz,
