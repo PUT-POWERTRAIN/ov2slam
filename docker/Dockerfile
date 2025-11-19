@@ -12,6 +12,12 @@ RUN apt-get update \
 RUN apt update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-colcon-common-extensions build-essential cmake pkg-config git \
+    tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+###### Dodaje bridge do komunikacji sieciowej i tmux
+RUN apt-get update && apt-get install -y \
+    ros-${ROS_DISTRO}-rosbridge-server \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ws/src/ov2slam/Thirdparty
@@ -19,6 +25,10 @@ RUN git clone https://gitlab.com/libeigen/eigen.git
 RUN git clone https://github.com/opencv/opencv.git
 RUN git clone https://github.com/opencv/opencv_contrib.git
 RUN git clone https://github.com/laurentkneip/opengv.git
+
+############## przeniesienie foldera png_SLAM_data do ws
+RUN mkdir -p /ws/png_SLAM_data
+COPY png_slam_data /ws/png_SLAM_data
 
 ##############
 ### Eigen3 ###
@@ -193,6 +203,8 @@ RUN apt update \
         ros-${ROS_DISTRO}-rosbag2-storage-default-plugins \
         ros-${ROS_DISTRO}-rviz2 \
         ros-${ROS_DISTRO}-backward-ros \
+        ros-${ROS_DISTRO}-rqt \
+        ros-${ROS_DISTRO}-rqt-common-plugins \
     && rm -rf /var/lib/apt/lists/*
 
 ADD . /ws/src/ov2slam
