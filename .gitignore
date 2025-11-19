@@ -314,3 +314,5 @@ AMENT_IGNORE
 
 # Ignore ov2slam results files
 *.txt
+
+png_slam_data/
