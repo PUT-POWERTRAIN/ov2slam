@@ -108,7 +108,7 @@ Visualization Manager:
       Position Transformer: ""
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.009999999776482582
+      Size (m): 0.1
       Style: Flat Squares
       Topic:
         Depth: 5
@@ -161,7 +161,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: world
+    Fixed Frame: dworld
     Frame Rate: 30
   Name: root
   Tools:
