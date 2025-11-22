@@ -53,10 +53,10 @@ private:
     transform.transform.translation.z = 0.0;
     
     // Rotacja (quaternion)
-    transform.transform.rotation.x = 0.7067696;
-    transform.transform.rotation.y = 0.047118;
+    transform.transform.rotation.x = -0.656059;
+    transform.transform.rotation.y = 0;
     transform.transform.rotation.z = 0;
-    transform.transform.rotation.w = 0.7058729;
+    transform.transform.rotation.w = 0.7547096;
     
     tf_msg.transforms.push_back(transform);
     

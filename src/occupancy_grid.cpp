@@ -37,7 +37,7 @@ occupancy_grid::occupancy_grid() : Node("slam_to_navmap") {
 
     // deklaracja potrzebnych parametrow wraz z wartosciami domyslnymi
     this->declare_parameter("z_min", 0.0);
-    this->declare_parameter("z_max", 20.0);
+    this->declare_parameter("z_max", 3.0);
     this->declare_parameter("hit_thresh", 1);
 
     z_min = this->get_parameter("z_min").as_double();
@@ -67,11 +67,11 @@ void occupancy_grid::point_cloud_callback(const sensor_msgs::msg::PointCloud2::S
     sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
 
     while (iter_x != iter_x.end()) {
-        float z = 0.9955598*(*iter_x) + 0.0666031*(*iter_y) + 0.0665186*(*iter_z);
+        float z = 0.0*(*iter_x) + 0.9902681*(*iter_y) + 0.1391731*(*iter_z);
         if (z >= z_min && z <= z_max) { // filtracja po z
-            // odczyt x, y
-            float x = 0.0666031*(*iter_x) + 0.0009534*(*iter_y) + -0.9977791*(*iter_z);
-            float y = -0.0665186*(*iter_x) + 0.9977791*(*iter_y) + -0.0034868*(*iter_z);
+            // odczyt x, y 
+            float x = (*iter_x);
+            float y = 0.0*(*iter_x) + 0.1391731*(*iter_y) - 0.9902681*(*iter_z);
             // sprawdzenie min i max x,y
             if (flag_first) {
                 msg_min_x = msg_max_x = x;
@@ -112,7 +112,6 @@ void occupancy_grid::point_cloud_callback(const sensor_msgs::msg::PointCloud2::S
         else occupancy_map.push_back(0);
     }
 
-    RCLCPP_INFO(this->get_logger(), "Wysyłam mape");
     send_msg(msg->header.stamp, occupancy_map);
 }
 
@@ -127,8 +126,8 @@ void occupancy_grid::send_msg(const rclcpp::Time& timestamp, const std::vector<i
     msg.info.height = msg_height;
 
     // chcemy, zeby statek byl na samym srodku, occupancy grid idzie tylko na jedna cwiartke ukladu, wiec trzebva przesunac o polowe ile heigth i width
-    msg.info.origin.position.x = msg_max_x; // x statku + 1/2 width
-    msg.info.origin.position.y = msg_max_y; // y statku + 1/2 height
+    msg.info.origin.position.x = msg_min_x;
+    msg.info.origin.position.y = msg_min_y;
     msg.info.origin.position.z = 0; // hardkode 0
     
     // orientacja taka jaka jest statek

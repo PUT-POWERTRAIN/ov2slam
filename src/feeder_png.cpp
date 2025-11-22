@@ -99,6 +99,7 @@ void feeder_png::send_photo_data() {
     rclcpp::Time start_time = this->now();
     
     while (std::getline(time_stamps, line)) {
+        if (!rclcpp::ok()) return; // wyjscie po ^C
         if (line.empty()) continue;
         
         std::istringstream iss(line);
@@ -160,7 +161,7 @@ void feeder_png::send_photo_data() {
         if (frame_count > 1) {
             auto next_line_pos = time_stamps.tellg();
             std::string next_line;
-            if (rclcpp::ok() && std::getline(time_stamps, next_line)) {
+            if (std::getline(time_stamps, next_line)) {
                 std::istringstream next_iss(next_line);
                 double next_timestamp;
                 std::string next_photo;
