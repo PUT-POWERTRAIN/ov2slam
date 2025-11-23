@@ -132,6 +132,18 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /local_kfs_window
       Value: true
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: occupancy_grid
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: Marker
