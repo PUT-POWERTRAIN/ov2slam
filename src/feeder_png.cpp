@@ -166,7 +166,7 @@ void feeder_png::send_photo_data() {
                 double next_timestamp;
                 std::string next_photo;
                 if (next_iss >> next_timestamp >> next_photo) {
-                    double wait_time = (next_timestamp - timestamp_sec) * 1000.0; // oblicza ile ma poczekać do następnego timestamp
+                    double wait_time = (next_timestamp - timestamp_sec) * 1000.0/2; // oblicza ile ma poczekać do następnego timestamp
                     if (wait_time > 0 && wait_time < 1000) { // ignoruje jesli przerwa jest wieksza niz sekunda
                         rclcpp::sleep_for(std::chrono::milliseconds(static_cast<int>(wait_time))); // czeka
                     }

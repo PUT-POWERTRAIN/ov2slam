@@ -52,10 +52,25 @@ def generate_launch_description():
         default_value='true',
         description='true if loop on dataset'
     )
-    apply_gravity_correction_arg = DeclareLaunchArgument(
-        'apply_gravity_correction',
-        default_value='true',
-        description='true if enable feeder IMU corrcetion'
+    z_min_arg = DeclareLaunchArgument(
+        'z_min',
+        default_value='0.0',
+        description='filtracja punktów, min wartosc z'
+    )
+    z_max_arg = DeclareLaunchArgument(
+        'z_max',
+        default_value='3.0',
+        description='filtracja punktów, max wartosc z'
+    )
+    hit_thresh_arg = DeclareLaunchArgument(
+        'hit_thresh',
+        default_value='1',
+        description='ilosc trafien w komórke na occupancy grid aby uznac za zajete'
+    )
+    res_arg = DeclareLaunchArgument(
+        'res',
+        default_value='0.5',
+        description='rozdzielczość dla occupancy grid'
     )
 
     # Konfiguracja
@@ -68,8 +83,10 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     enable_rviz = LaunchConfiguration('enable_rviz')
     loop = LaunchConfiguration('loop')
-    apply_gravity_correction = LaunchConfiguration('apply_gravity_correction')
-
+    z_min = LaunchConfiguration("z_min")
+    z_max = LaunchConfiguration("z_max")
+    hit_thresh = LaunchConfiguration("hit_thresh")
+    res = LaunchConfiguration("res")
 
     # Node: OV2SLAM
     ov2slam_node = Node(
@@ -119,6 +136,12 @@ def generate_launch_description():
         executable='occupancy_grid',
         name='occupancy_grid',
         output='screen',
+        parameters=[{
+            'z_min': z_min,
+            'z_max': z_max,
+            'hit_thresh': hit_thresh,
+            'res': res,
+        }],
         respawn=False,
         emulate_tty=True,
     )
@@ -166,8 +189,10 @@ def generate_launch_description():
         use_sim_time_arg,
         enable_rviz_arg,
         loop_arg,
-        apply_gravity_correction_arg,
-
+        z_min_arg,
+        z_max_arg,
+        hit_thresh_arg,
+        res_arg,
         # Nodes
         ov2slam_node,
         delayed_rviz,

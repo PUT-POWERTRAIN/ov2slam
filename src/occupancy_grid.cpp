@@ -39,11 +39,12 @@ occupancy_grid::occupancy_grid() : Node("slam_to_navmap") {
     this->declare_parameter("z_min", 0.0);
     this->declare_parameter("z_max", 3.0);
     this->declare_parameter("hit_thresh", 1);
+    this->declare_parameter("res", 0.5);
 
     z_min = this->get_parameter("z_min").as_double();
     z_max = this->get_parameter("z_max").as_double();
     hit_thresh = this->get_parameter("hit_thresh").as_int();
-    res = 0.5; // na razie statyczne
+    res = this->get_parameter("res").as_double();
 
     RCLCPP_INFO(this->get_logger(), "Parametr z_min %f", z_min);
     RCLCPP_INFO(this->get_logger(), "Parametr z_max %f", z_max);
