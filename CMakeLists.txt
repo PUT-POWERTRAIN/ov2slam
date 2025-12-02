@@ -251,4 +251,17 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(feeder_imu src/feeder_imu.cpp)
+
+ament_target_dependencies(feeder_imu
+  rclcpp
+  std_msgs
+  sensor_msgs
+)
+
+install(TARGETS
+  feeder_imu
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

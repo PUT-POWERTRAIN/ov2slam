@@ -26,10 +26,6 @@ RUN git clone https://github.com/opencv/opencv.git
 RUN git clone https://github.com/opencv/opencv_contrib.git
 RUN git clone https://github.com/laurentkneip/opengv.git
 
-############## przeniesienie foldera png_SLAM_data do ws
-RUN mkdir -p /ws/png_SLAM_data
-COPY png_slam_data /ws/png_SLAM_data
-
 ##############
 ### Eigen3 ###
 ##############

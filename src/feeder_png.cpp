@@ -27,10 +27,10 @@ private:
 feeder_png::feeder_png() : Node("feeder_obrazow_png")
 {
     // Deklaracja parametrów
-    this->declare_parameter("images_folder_left", "/ws/png_SLAM_data/left_images");
-    this->declare_parameter("images_folder_right", "/ws/png_SLAM_data/right_images");
+    this->declare_parameter("images_folder_left", "/datasets/left_images");
+    this->declare_parameter("images_folder_right", "/datasets/right_images");
     this->declare_parameter("enable_stereo", true);
-    this->declare_parameter("timestamp_path", "/ws/png_SLAM_data/timestamp.txt");
+    this->declare_parameter("timestamp_path", "/datasets/timestamp.txt");
     this->declare_parameter("loop", true);
     
     // Pobranie wartości parametrów
@@ -100,6 +100,7 @@ void feeder_png::send_photo_data() {
     rclcpp::Time start_time = this->now();
     
     while (std::getline(time_stamps, line)) {
+        if (!rclcpp::ok()) return;
         if (line.empty()) continue;
         
         std::istringstream iss(line);
@@ -115,8 +116,15 @@ void feeder_png::send_photo_data() {
             first_timestamp = timestamp_sec;
         }
         
+        // Oblicz kiedy ta klatka powinna być opublikowana
         double time_offset = timestamp_sec - first_timestamp;
-        rclcpp::Time ros_timestamp = start_time + rclcpp::Duration::from_seconds(time_offset);
+        rclcpp::Time target_time = start_time + rclcpp::Duration::from_seconds(time_offset);
+        
+        rclcpp::Time current_time = this->now();
+        if (target_time > current_time) {
+            auto sleep_duration = target_time - current_time;
+            rclcpp::sleep_for(std::chrono::nanoseconds(sleep_duration.nanoseconds()));
+        }
         
         std::string left_photo_name = images_folder_left_ + "/" + photo_name + ".png";
         std::string right_photo_name;
@@ -130,25 +138,28 @@ void feeder_png::send_photo_data() {
         }
         
         if (img_left.empty() || (enable_stereo_ && img_right.empty())) {
-            RCLCPP_ERROR(this->get_logger(), "Nie można wczytać obrazu: %s, lub %s", left_photo_name.c_str(), right_photo_name.c_str());
+            RCLCPP_ERROR(this->get_logger(), "Nie można wczytać obrazu: %s, lub %s", 
+                        left_photo_name.c_str(), right_photo_name.c_str());
             continue;
         }
         
         cv::Mat img_resized;
         cv::resize(img_left, img_resized, cv::Size(752, 480), 0, 0, cv::INTER_LINEAR);
         
+        rclcpp::Time ros_timestamp = target_time;
         auto msg_left = createImageMsg(img_resized, ros_timestamp);
         msg_left.header.frame_id = "cam0";
-        
-        image_publisher_left_->publish(msg_left);
 
         if (enable_stereo_) {
             cv::resize(img_right, img_resized, cv::Size(752, 480), 0, 0, cv::INTER_LINEAR);
 
             auto msg_right = createImageMsg(img_resized, ros_timestamp);
             msg_right.header.frame_id = "cam1";
-
+            
+            image_publisher_left_->publish(msg_left);
             image_publisher_right_->publish(msg_right);
+        } else {
+            image_publisher_left_->publish(msg_left);
         }
 
         frame_count++;
@@ -156,25 +167,6 @@ void feeder_png::send_photo_data() {
         if (frame_count % 10 == 0) {
             RCLCPP_INFO(this->get_logger(), "Opublikowano %d frame'ów, subskrybenci: %zu", 
                         frame_count, image_publisher_left_->get_subscription_count());
-        }
-        
-        if (frame_count > 1) {
-            auto next_line_pos = time_stamps.tellg();
-            std::string next_line;
-            if (rclcpp::ok() && std::getline(time_stamps, next_line)) {
-                std::istringstream next_iss(next_line);
-                double next_timestamp;
-                std::string next_photo;
-                if (next_iss >> next_timestamp >> next_photo) {
-                    double wait_time = (next_timestamp - timestamp_sec) * 1000.0; // oblicza ile ma poczekać do następnego timestamp
-                    if (wait_time > 0 && wait_time < 1000) { // ignoruje jesli przerwa jest wieksza niz sekunda
-                        rclcpp::sleep_for(std::chrono::milliseconds(static_cast<int>(wait_time))); // czeka
-                    }
-                }
-                time_stamps.seekg(next_line_pos);
-            }
-        } else {
-            rclcpp::sleep_for(std::chrono::milliseconds(100));
         }
     }
     

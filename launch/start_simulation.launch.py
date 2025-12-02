@@ -9,17 +9,17 @@ def generate_launch_description():
     # Deklaracja argumentów launch
     params_file_arg = DeclareLaunchArgument(
         'params_file',
-        default_value='/ws/png_SLAM_data/custom_params.yaml',
+        default_value='/datasets/custom_params.yaml',
         description='Path to the parameters YAML file for OV2SLAM'
     )
     images_folder_left_arg = DeclareLaunchArgument(
         'images_folder_left',
-        default_value='/ws/png_SLAM_data/left_images',
+        default_value='/datasets/left_images',
         description='Path to the folder with PNG images for left stereo camer'
     )
     images_folder_right_arg = DeclareLaunchArgument(
         'images_folder_right',
-        default_value='/ws/png_SLAM_data/right_images',
+        default_value='/datasets/right_images',
         description='Path to the folder with PNG images for right stereo camera'
     )
     enable_stereo_arg = DeclareLaunchArgument(
@@ -29,7 +29,7 @@ def generate_launch_description():
     )
     timestamp_path_arg = DeclareLaunchArgument(
         'timestamp_path',
-        default_value='/ws/png_SLAM_data/timestamp.txt',
+        default_value='/datasets/timestamp.txt',
         description='Path to the timestamp.txt file'
     )
     rviz_config_arg = DeclareLaunchArgument(
@@ -52,6 +52,11 @@ def generate_launch_description():
         default_value='true',
         description='true if loop on dataset'
     )
+    enable_imu_arg = DeclareLaunchArgument(
+        'enable_imu',
+        default_value='true',
+        description='enables imu feeder'
+    )
 
     # Konfiguracja
     params_file = LaunchConfiguration('params_file')
@@ -63,6 +68,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     enable_rviz = LaunchConfiguration('enable_rviz')
     loop = LaunchConfiguration('loop')
+    enable_imu = LaunchConfiguration('enable_imu')
 
     # Node: OV2SLAM
     ov2slam_node = Node(
@@ -98,6 +104,20 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    feeder_imu_node = Node(
+        package='ov2slam',
+        executable='feeder_imu',
+        name='feeder_imu',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'loop': loop,
+        }],
+        condition = IfCondition(enable_imu),
+        respawn=False,
+        emulate_tty=True,
+    )
+
     # Node: RViz2 z software rendering dla Dockera
     rviz_node = Node(
         package='rviz2',
@@ -116,7 +136,7 @@ def generate_launch_description():
     # Opóźnij start FEEDER_PNG o 3 sekundy
     delayed_feeder = TimerAction(
         period=3.0,
-        actions=[feeder_png_node]
+        actions=[feeder_png_node, feeder_imu_node]
     )
 
     # Opóźnij start RViz o 2 sekundy
@@ -141,6 +161,7 @@ def generate_launch_description():
         use_sim_time_arg,
         enable_rviz_arg,
         loop_arg,
+        enable_imu_arg,
         # Nodes
         ov2slam_node,
         delayed_rviz,
