@@ -57,6 +57,11 @@ def generate_launch_description():
         default_value='true',
         description='enables imu feeder'
     )
+    imu_path_arg = DeclareLaunchArgument(
+        'imu_path',
+        default_value='/datasets/ahrs.txt',
+        description='enables imu feeder'
+    )
 
     # Konfiguracja
     params_file = LaunchConfiguration('params_file')
@@ -69,6 +74,7 @@ def generate_launch_description():
     enable_rviz = LaunchConfiguration('enable_rviz')
     loop = LaunchConfiguration('loop')
     enable_imu = LaunchConfiguration('enable_imu')
+    imu_path = LaunchConfiguration('imu_path')
 
     # Node: OV2SLAM
     ov2slam_node = Node(
@@ -112,6 +118,7 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': use_sim_time,
             'loop': loop,
+            'imu_path': imu_path,
         }],
         condition = IfCondition(enable_imu),
         respawn=False,
@@ -162,6 +169,7 @@ def generate_launch_description():
         enable_rviz_arg,
         loop_arg,
         enable_imu_arg,
+        imu_path_arg,
         # Nodes
         ov2slam_node,
         delayed_rviz,
