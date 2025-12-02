@@ -2,8 +2,7 @@ Instalacja:
 ```
     git clone https://github.com/PUT-POWERTRAIN/ov2slam.git
 ```
-Data set canal pohang można pobrać ze strony: https://sites.google.com/view/pohang-canal-dataset/home. Główny plik ma 100GB, ale na szczęście udostępnili próbki po 3GB w zakładce Samples. Umieścić zdjęcia w folderze png_slam_data przed zbudowaniem. Folder jest przenoszony do środka dockera.   
-
+Data set canal pohang można pobrać ze strony: https://sites.google.com/view/pohang-canal-dataset/home. Główny plik ma 100GB, ale na szczęście udostępnili próbki po 3GB w zakładce Samples. Wybrany dataset należy umieścić w folderze /ov2slam/docker/datasets. Docker ma dostęp w środku do tego folderu.  
 Lub folder ze zdjęciami można skopiować od dockera ręcznie przez komendę (rozwiązanie tymczasowe, jak docker zostanie zamknięty, pliki znikną):
 ```
     docker cp ...
@@ -21,6 +20,10 @@ Uruchomianie docker:
 ```
     make up
 ```
+Jeśli będzie problem z uruchomieniem dockera to prawdopodobnie problem rozwiąże poniższa komenda:
+```
+    chmod +x scripts/dev-entrypoint.sh
+```
 Uwaga, może przerwać budowanie lub w trakcie działania dockera z errorem 137, oznacza za mała pamięć RAM. W takim przypadku trzeba zwiększyć przeznaczoną pamięć na docker.
 
 W środku dockera:
@@ -31,12 +34,15 @@ Został utworzony plik launch, który uruchamia wszystkie potrzebne node do dzia
 
 | Argument | Opis | Wartość domyślna |
 | :--- | :--- | :--- |
-| images_folder_left | ścieżka do folderu ze zdjęciami lewej kamery stereo, lub zdjęciami mono | /ws/png_SLAM_data/left_images |
-| images_folder_right | ścieżka do folderu ze zdjęciami prawej kamery stereo, w trybie mono nie jest używany | /ws/png_SLAM_data/right_images |
+| images_folder_left | ścieżka do folderu ze zdjęciami lewej kamery stereo, lub zdjęciami mono | /datasets/left_images |
+| images_folder_right | ścieżka do folderu ze zdjęciami prawej kamery stereo, w trybie mono nie jest używany | /datasets/right_images |
 | enable_stereo | false - symulacja w trybie mono, true - symulacja w trybie stereo | true |
-| timestamp_path | ścieżka do pliku timestamp.txt | /ws/png_SLAM_data/timestamp.txt |
-| params_file | ścieżka do pliku configuracyjnego .yaml do ov2slam | /ws/png_SLAM_data/custom_params.yaml |
+| timestamp_path | ścieżka do pliku timestamp.txt | /datasets/timestamp.txt |
+| params_file | ścieżka do pliku configuracyjnego .yaml do ov2slam | /datasets/custom_params.yaml |
 | enable_rviz | false - symulacja bez wizualizacji, true - symulacja z wizualizacją | true |
+| loop | false - symulajca wykona się raz, true - symulacja odpala się w pętli do wystąpnia przerwania z ^C | true |
+| enable_imu | false - nie odpali się node wrzucający dane imu, true - uruchomi się node wrzucający dane imu | true |
+| imu_path | NA RAZIE NIE JEST DODANE, PROSZĘ WRZUCIĆ PLIK -- ahrs.txt --  DO FOLDERU datasets | --- |
 
 Kod oczekuje pliku timestamp.txt w formacie [timestamp] spacja [nazwa pliku]:
 
