@@ -42,7 +42,7 @@ Został utworzony plik launch, który uruchamia wszystkie potrzebne node do dzia
 | enable_rviz | false - symulacja bez wizualizacji, true - symulacja z wizualizacją | true |
 | loop | false - symulajca wykona się raz, true - symulacja odpala się w pętli do wystąpnia przerwania z ^C | true |
 | enable_imu | false - nie odpali się node wrzucający dane imu, true - uruchomi się node wrzucający dane imu | true |
-| imu_path | NA RAZIE NIE JEST DODANE, PROSZĘ WRZUCIĆ PLIK -- ahrs.txt --  DO FOLDERU datasets | --- |
+| imu_path | ścieżka do pliku zawierającego dane z imu | /datasets/ahrs.txt |
 
 Kod oczekuje pliku timestamp.txt w formacie [timestamp] spacja [nazwa pliku]:
 
@@ -51,6 +51,9 @@ Kod oczekuje pliku timestamp.txt w formacie [timestamp] spacja [nazwa pliku]:
 | 1625124364.469731000 | 000153 |
 | 1625124364.569781000 | 000154 |
 | 1625124364.669704000 | 000155 |
+
+Kod oczekuje pliku z danymi imu tak jak podaje pohang canal dataset:
+<img width="1619" height="75" alt="image" src="https://github.com/user-attachments/assets/dee2ca61-bcfc-4dc4-91a4-f5e7e4c43fbb" />
 
 Komenda do uruchamiania pliku launch:
 ``` 
