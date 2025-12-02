@@ -23,7 +23,7 @@ feeder_imu::feeder_imu() : Node("feeder_imu_node") {
     this->declare_parameter("imu_path", "/datasets/ahrs.txt");
     this->declare_parameter("loop", true);
 
-    imu_data_path_ = this->get_parameter("imu_data").as_string();
+    imu_data_path_ = this->get_parameter("imu_path").as_string();
     loop_ = this->get_parameter("loop").as_bool();
 
     if (loop_) RCLCPP_INFO(this->get_logger(), "Odtwarzanie dataset w pętli");
