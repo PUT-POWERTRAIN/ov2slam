@@ -8,10 +8,10 @@ Camera.topic_right: /image_right_raw_data
 Camera.model_left: pinhole
 Camera.model_right: pinhole
 
-Camera.left_nwidth: 752
-Camera.left_nheight: 480
-Camera.right_nwidth: 752
-Camera.right_nheight: 480
+Camera.left_nwidth: 2048
+Camera.left_nheight: 1080
+Camera.right_nwidth: 2048
+Camera.right_nheight: 1080
 
 # Camera calibration and distortion parameters (OpenCV) 
 Camera.fxl: 1814.5061420730431
@@ -37,19 +37,28 @@ body_T_cam0: !!opencv-matrix
    rows: 4
    cols: 4
    dt: d
-   data: [0., 0., 1., 5.036,
-            1., 0., 0., -0.441,
-            0., 1., 0., -1.771,
+   data: [0., 0.99, 0.14, 5.0362549728344614,
+            1., 0., 0., -0.44101021275849878,
+            0., 0.14, -0.99, -1.771000242852925,
             0., 0., 0., 1.]
+   #data: [0., 0.99, 0.14, 5.036,
+   #         1., 0., 0., -0.441,
+   #         0., 0.14, -0.99, -1.771,
+   #         0., 0., 0., 1.]
 
 body_T_cam1: !!opencv-matrix
    rows: 4
    cols: 4
    dt: d
-   data: [0., 0., 1., 5.01,
-            1., 0., 0., 0.402,
-            0., 1., 0., -1.761,
+   data: [0., 0.99, 0.14, 5.0100574394498949,
+            1., 0., 0., 0.40231815989499159,
+            0., 0.14, -0.99, -1.7616651319571297,
             0., 0., 0., 1.]
+   #data: [0., 0.99, 0.14, 5.01,
+   #         1., 0., 0., 0.402,
+   #         0., 0.14, -0.99, -1.761,
+   #         0., 0., 0., 1.]
+            
 
 #--------------------------------------------------------------------------------------------
 # SLAM Parameters. Adjust them!

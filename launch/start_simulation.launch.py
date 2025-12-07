@@ -125,6 +125,15 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    imu_transform_node = Node(
+        package='ov2slam',
+        executable='imu_transform',
+        name='imu_transform',
+        output='screen',
+        respawn=False,
+        emulate_tty=True,
+    )
+
     # Node: RViz2 z software rendering dla Dockera
     rviz_node = Node(
         package='rviz2',
@@ -143,7 +152,7 @@ def generate_launch_description():
     # Opóźnij start FEEDER_PNG o 3 sekundy
     delayed_feeder = TimerAction(
         period=3.0,
-        actions=[feeder_png_node, feeder_imu_node]
+        actions=[feeder_png_node, feeder_imu_node, imu_transform_node]
     )
 
     # Opóźnij start RViz o 2 sekundy

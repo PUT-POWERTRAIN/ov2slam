@@ -20,46 +20,48 @@ private:
     std::string images_folder_right_;
     std::string timestamp_path_;
     bool enable_stereo_;
-    
+
+    cv::Mat buffer_left_;      // STAŁY bufor unikający realokacji
+    cv::Mat buffer_right_;     // STAŁY bufor unikający realokacji
+
+    sensor_msgs::msg::Image image_msg_left_;
+    sensor_msgs::msg::Image image_msg_right_;
+
     sensor_msgs::msg::Image createImageMsg(const cv::Mat& img, const rclcpp::Time& timestamp);
 };
 
 feeder_png::feeder_png() : Node("feeder_obrazow_png")
 {
-    // Deklaracja parametrów
     this->declare_parameter("images_folder_left", "/datasets/left_images");
     this->declare_parameter("images_folder_right", "/datasets/right_images");
     this->declare_parameter("enable_stereo", true);
     this->declare_parameter("timestamp_path", "/datasets/timestamp.txt");
     this->declare_parameter("loop", true);
     
-    // Pobranie wartości parametrów
     images_folder_left_ = this->get_parameter("images_folder_left").as_string();
     images_folder_right_ = this->get_parameter("images_folder_right").as_string();
     enable_stereo_ = this->get_parameter("enable_stereo").as_bool();
     timestamp_path_ = this->get_parameter("timestamp_path").as_string();
     loop_ = this->get_parameter("loop").as_bool();
 
-    if (loop_) RCLCPP_INFO(this->get_logger(), "Odtwarzanie dataset w pętli");
-    
-    if (enable_stereo_) {
-        RCLCPP_INFO(this->get_logger(), "Stereo aktywne");
-        RCLCPP_INFO(this->get_logger(), "Używam ścieżki images_folder_left: %s", images_folder_left_.c_str());
-        RCLCPP_INFO(this->get_logger(), "Używam ścieżki images_folder_right: %s", images_folder_right_.c_str());
-    } else {
-        RCLCPP_INFO(this->get_logger(), "Stereo nieaktywne");
-        RCLCPP_INFO(this->get_logger(), "Używam ścieżki images_folder: %s", images_folder_left_.c_str());
-    }
-    RCLCPP_INFO(this->get_logger(), "Używam ścieżki do pliku timestamp: %s", timestamp_path_.c_str());
-    
-    // Tworzenie publisherów
     image_publisher_left_ = this->create_publisher<sensor_msgs::msg::Image>("image_left_raw_data", 10);
-    if (enable_stereo_) image_publisher_right_ = this->create_publisher<sensor_msgs::msg::Image>("image_right_raw_data", 10);
+    if (enable_stereo_)
+        image_publisher_right_ = this->create_publisher<sensor_msgs::msg::Image>("image_right_raw_data", 10);
+
+    // Pre-allocate sensor_msgs buffers
+    image_msg_left_.encoding = "bgr8";
+    image_msg_left_.is_bigendian = false;
+
+    if (enable_stereo_) {
+        image_msg_right_.encoding = "bgr8";
+        image_msg_right_.is_bigendian = false;
+    }
 }
 
 sensor_msgs::msg::Image feeder_png::createImageMsg(const cv::Mat& img, const rclcpp::Time& timestamp)
 {
-    auto msg = sensor_msgs::msg::Image();
+    sensor_msgs::msg::Image msg;
+
     msg.header.stamp = timestamp;
     msg.header.frame_id = "camera";
     msg.height = img.rows;
@@ -67,130 +69,102 @@ sensor_msgs::msg::Image feeder_png::createImageMsg(const cv::Mat& img, const rcl
     msg.encoding = "bgr8";
     msg.is_bigendian = false;
     msg.step = img.cols * img.elemSize();
-    
-    size_t data_size = img.total() * img.elemSize();
-    msg.data.resize(data_size);
-    
-    if (img.isContinuous()) {
-        std::memcpy(msg.data.data(), img.data, data_size);
-    } else {
-        size_t idx = 0;
-        for(int i = 0; i < img.rows; i++) {
-            std::memcpy(msg.data.data() + idx, img.ptr(i), img.cols * img.elemSize());
-            idx += img.cols * img.elemSize();
-        }
-    }
-    
+    msg.data.assign(img.datastart, img.dataend);   // szybkie kopiowanie
+
     return msg;
 }
 
 void feeder_png::send_photo_data() {
+
     std::ifstream time_stamps(timestamp_path_);
-    
-    if (!time_stamps.is_open()) {
-        RCLCPP_ERROR(this->get_logger(), "Cannot open file: %s", timestamp_path_.c_str());
-        throw std::runtime_error("Failed to open timestamp file");
+    if (!time_stamps.is_open()){
+        RCLCPP_ERROR(this->get_logger(),"Cannot open file: %s",timestamp_path_.c_str());
+        return;
     }
-    
-    RCLCPP_INFO(this->get_logger(), "Loaded timestamps from: %s", timestamp_path_.c_str());
-    
+
     std::string line;
     int frame_count = 0;
+
     double first_timestamp = -1.0;
     rclcpp::Time start_time = this->now();
-    
-    while (std::getline(time_stamps, line)) {
+
+    while(std::getline(time_stamps,line))
+    {
         if (!rclcpp::ok()) return;
         if (line.empty()) continue;
-        
-        std::istringstream iss(line);
+
         double timestamp_sec;
         std::string photo_name;
-        
-        if (!(iss >> timestamp_sec >> photo_name)) {
-            RCLCPP_WARN(this->get_logger(), "Błąd parsowania linii: %s", line.c_str());
-            continue;
+
+        {
+            std::istringstream iss(line);
+            iss >> timestamp_sec >> photo_name;
         }
-        
-        if (first_timestamp < 0) {
+
+        if (first_timestamp < 0)
             first_timestamp = timestamp_sec;
-        }
-        
-        // Oblicz kiedy ta klatka powinna być opublikowana
-        double time_offset = timestamp_sec - first_timestamp;
-        rclcpp::Time target_time = start_time + rclcpp::Duration::from_seconds(time_offset);
-        
-        rclcpp::Time current_time = this->now();
-        if (target_time > current_time) {
-            auto sleep_duration = target_time - current_time;
-            rclcpp::sleep_for(std::chrono::nanoseconds(sleep_duration.nanoseconds()));
-        }
-        
-        std::string left_photo_name = images_folder_left_ + "/" + photo_name + ".png";
-        std::string right_photo_name;
 
-        cv::Mat img_left = cv::imread(left_photo_name, cv::IMREAD_COLOR);
-        cv::Mat img_right;
+        // Docelowy ROS time
+        double offset = timestamp_sec - first_timestamp;
+        rclcpp::Time target_time = start_time + rclcpp::Duration::from_seconds(offset);
 
-        if (enable_stereo_) {
-            std::string right_photo_name = images_folder_right_ + "/" + photo_name + ".png";
-            img_right = cv::imread(right_photo_name, cv::IMREAD_COLOR);
-        }
-        
-        if (img_left.empty() || (enable_stereo_ && img_right.empty())) {
-            RCLCPP_ERROR(this->get_logger(), "Nie można wczytać obrazu: %s, lub %s", 
-                        left_photo_name.c_str(), right_photo_name.c_str());
+        // Synchronizacja czasowa
+        rclcpp::Time now = this->now();
+        if (target_time > now)
+            rclcpp::sleep_for(std::chrono::nanoseconds((target_time - now).nanoseconds()));
+
+        // Wczytaj obraz (ZWOLNIONE resize)
+        std::string left_path = images_folder_left_ + "/" + photo_name + ".png";
+
+        buffer_left_ = cv::imread(left_path, cv::IMREAD_COLOR);
+        if (buffer_left_.empty()) {
+            RCLCPP_ERROR(this->get_logger(), "Cannot load image %s", left_path.c_str());
             continue;
         }
-        
-        cv::Mat img_resized;
-        cv::resize(img_left, img_resized, cv::Size(752, 480), 0, 0, cv::INTER_LINEAR);
-        
-        rclcpp::Time ros_timestamp = target_time;
-        auto msg_left = createImageMsg(img_resized, ros_timestamp);
+
+        auto msg_left = createImageMsg(buffer_left_, target_time);
         msg_left.header.frame_id = "cam0";
 
         if (enable_stereo_) {
-            cv::resize(img_right, img_resized, cv::Size(752, 480), 0, 0, cv::INTER_LINEAR);
+            std::string right_path = images_folder_right_ + "/" + photo_name + ".png";
+            buffer_right_ = cv::imread(right_path, cv::IMREAD_COLOR);
 
-            auto msg_right = createImageMsg(img_resized, ros_timestamp);
+            if (buffer_right_.empty()) {
+                RCLCPP_ERROR(this->get_logger(), "Cannot load stereo image %s", right_path.c_str());
+                continue;
+            }
+
+            auto msg_right = createImageMsg(buffer_right_, target_time);
             msg_right.header.frame_id = "cam1";
-            
+
             image_publisher_left_->publish(msg_left);
             image_publisher_right_->publish(msg_right);
-        } else {
+        }
+        else {
             image_publisher_left_->publish(msg_left);
         }
 
         frame_count++;
-        
+
         if (frame_count % 10 == 0) {
-            RCLCPP_INFO(this->get_logger(), "Opublikowano %d frame'ów, subskrybenci: %zu", 
-                        frame_count, image_publisher_left_->get_subscription_count());
+            RCLCPP_INFO(this->get_logger(), "Published %d frames", frame_count);
         }
     }
-    
-    time_stamps.close();
-    RCLCPP_INFO(this->get_logger(), "DONE! Opublikowano %d obrazów", frame_count);
+
+    RCLCPP_INFO(this->get_logger(), "DONE! Published %d frames", frame_count);
 }
 
 int main(int argc, char** argv)
 {
-    // WAŻNE: argc i argv są przekazywane do rclcpp::init()
-    // ROS2 automatycznie parsuje argumenty w formacie --ros-args -p
-    rclcpp::init(argc, argv);
+    rclcpp::init(argc,argv);
+    auto feeder = std::make_shared<feeder_png>();
 
-    try {
-        auto feeder = std::make_shared<feeder_png>();
-        if (feeder->loop_) {
-            while (rclcpp::ok()) feeder->send_photo_data();
-        } else feeder->send_photo_data();
-    } catch (const std::exception& e) {
-        RCLCPP_ERROR(rclcpp::get_logger("feeder"), "Error: %s", e.what());
-        rclcpp::shutdown();
-        return 1;
+    if (feeder->loop_) {
+        while (rclcpp::ok()) feeder->send_photo_data();
+    } else {
+        feeder->send_photo_data();
     }
-    
+
     rclcpp::shutdown();
     return 0;
 }

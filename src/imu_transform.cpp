@@ -5,75 +5,9 @@
 #include "builtin_interfaces/msg/time.hpp"
 #include <sensor_msgs/msg/imu.hpp>
 #include <vector>
-#include <ceres/ceres.h>
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 #include <cmath>
-
-// Struktura funkcji kosztu dla Ceres
-struct OrientationCostFunctor {
-  OrientationCostFunctor(const Eigen::Vector3d& imu_vec,
-                        const Eigen::Vector3d& prev_imu_vec,
-                        const Eigen::Vector3d& vo_pose,
-                        const Eigen::Vector3d& prev_vo_pose)
-      : imu_vec_(imu_vec.normalized()),
-        prev_imu_vec_(prev_imu_vec.normalized()),
-        vo_pose_(vo_pose.normalized()),
-        prev_vo_pose_(prev_vo_pose.normalized()) {
-    d_imu_ = (imu_vec_ - prev_imu_vec_).normalized();
-    d_vo_ = (vo_pose_ - prev_vo_pose_).normalized();
-  }
-
-  template <typename T>
-  bool operator()(const T* const angles, T* residual) const {
-    // angles = [roll, pitch, yaw]
-    T c_phi = ceres::cos(angles[0]);
-    T s_phi = ceres::sin(angles[0]);
-    T c_theta = ceres::cos(angles[1]);
-    T s_theta = ceres::sin(angles[1]);
-    T c_psi = ceres::cos(angles[2]);
-    T s_psi = ceres::sin(angles[2]);
-
-    // Macierz rotacji z kątów Eulera (ZYX convention)
-    Eigen::Matrix<T, 3, 3> R;
-    R(0, 0) = c_theta * c_psi;
-    R(0, 1) = c_theta * s_psi;
-    R(0, 2) = -s_theta;
-
-    R(1, 0) = s_phi * s_theta * c_psi - c_phi * s_psi;
-    R(1, 1) = s_phi * s_theta * s_psi + c_phi * c_psi;
-    R(1, 2) = s_phi * c_theta;
-
-    R(2, 0) = c_phi * s_theta * c_psi + s_phi * s_psi;
-    R(2, 1) = c_phi * s_theta * s_psi - s_phi * c_psi;
-    R(2, 2) = c_phi * c_theta;
-
-    // Predykcje
-    Eigen::Matrix<T, 3, 1> vo_pose_T = vo_pose_.cast<T>();
-    Eigen::Matrix<T, 3, 1> d_vo_T = d_vo_.cast<T>();
-    
-    Eigen::Matrix<T, 3, 1> pred_pose = R * vo_pose_T;
-    Eigen::Matrix<T, 3, 1> pred_growth = R * d_vo_T;
-
-    // Błąd pozycji
-    Eigen::Matrix<T, 3, 1> e_pose = imu_vec_.cast<T>() - pred_pose;
-    
-    // Błąd przyrostu
-    Eigen::Matrix<T, 3, 1> e_growth = d_imu_.cast<T>() - pred_growth;
-
-    // Suma kwadratów błędów
-    residual[0] = e_pose.squaredNorm() + e_growth.squaredNorm();
-
-    return true;
-  }
-
-private:
-  Eigen::Vector3d imu_vec_;
-  Eigen::Vector3d prev_imu_vec_;
-  Eigen::Vector3d vo_pose_;
-  Eigen::Vector3d prev_vo_pose_;
-  Eigen::Vector3d d_imu_;
-  Eigen::Vector3d d_vo_;
-};
 
 class TfStaticPublisher : public rclcpp::Node
 {
@@ -83,16 +17,21 @@ private:
   void tf_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg);
   void calculate_orientation_from_imu();
+  Eigen::Quaterniond calculateRotationQuaternion(
+    const Eigen::Vector3d& imu_vec_raw,
+    const Eigen::Vector3d& vo_pose_raw);
 
-  std::vector<double> imu;
-  std::vector<double> prev_imu;
-  std::vector<double> pose; 
-  std::vector<double> prev_pose;
-  std::vector<double> prev_iter_imu;  // Dane z poprzedniego wywołania calculate_orientation
-  double quaternion_x_;
-  double quaternion_y_;
-  double quaternion_z_;
-  double quaternion_w_;
+  Eigen::Vector3d imu_acceleration_;
+  Eigen::Vector3d vo_acceleration_;
+  Eigen::Vector3d vo_velocity_;
+  Eigen::Vector3d vo_pose_;
+  Eigen::Vector3d prev_vo_pose_;
+  Eigen::Vector3d prev_vo_velocity_;
+  rclcpp::Time last_time_;
+
+  bool static_tf_sent_;
+  bool has_initial_data_;
+  Eigen::Quaterniond q_orientation_;
   rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr publisher_tf_static_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr subscriber_pose_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subscriber_imu_;
@@ -100,19 +39,16 @@ private:
 
 TfStaticPublisher::TfStaticPublisher() : Node("tf_static_publisher")
 {
-  // Inicjalizacja kwaternionu
-  quaternion_x_ = 0.0;
-  quaternion_y_ = 0.0;
-  quaternion_z_ = 0.0;
-  quaternion_w_ = 1.0;
-
-  // Inicjalizacja wektorów
-  imu = {0.0, 0.0, 0.0};
-  prev_imu = {0.0, 0.0, 0.0};
-  pose = {0.0, 0.0, 0.0};
-  prev_pose = {0.0, 0.0, 0.0};
-  prev_iter_imu = {0.0, 0.0, 0.0};
-
+  static_tf_sent_ = false;
+  has_initial_data_ = false;
+  vo_pose_ = Eigen::Vector3d::Zero();
+  prev_vo_pose_ = Eigen::Vector3d::Zero();
+  vo_velocity_ = Eigen::Vector3d::Zero();
+  prev_vo_velocity_ = Eigen::Vector3d::Zero();
+  vo_acceleration_ = Eigen::Vector3d::Zero();
+  imu_acceleration_ = Eigen::Vector3d::Zero();
+  q_orientation_ = Eigen::Quaterniond::Identity();
+  
   // Ustawienia QoS dla /tf_static (TRANSIENT_LOCAL)
   auto qos_static = rclcpp::QoS(rclcpp::KeepLast(10));
   qos_static.transient_local();
@@ -138,228 +74,164 @@ TfStaticPublisher::TfStaticPublisher() : Node("tf_static_publisher")
 }
 
 void TfStaticPublisher::tf_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
-{
-  // Zapisz poprzednią pozycję
-  prev_pose = pose;
-  
-  // Pobierz nową pozycję z PoseStamped
-  pose = {msg->pose.position.x,
-          msg->pose.position.y,
-          msg->pose.position.z};
-  
-  RCLCPP_INFO(this->get_logger(), "pose: x=%.3f, y=%.3f, z=%.3f", 
-               pose[0], pose[1], pose[2]);
-  // Jeśli mamy wystarczające dane, oblicz orientację
-  RCLCPP_INFO(this->get_logger(), "imu: x=%.3f, y=%.3f, z=%.3f", 
-               imu[0], imu[1], imu[2]);
-  if (prev_pose != std::vector<double>{0.0, 0.0, 0.0} && 
-      imu != std::vector<double>{0.0, 0.0, 0.0}) {
-    calculate_orientation_from_imu();
-    // Aktualizuj prev_iter_imu po obliczeniu orientacji
-    prev_iter_imu = imu;
+{  
+  // Jeśli już wysłano static_tf, nie rób nic więcej
+  if (static_tf_sent_) {
+    return;
   }
 
-  // Pobierz timestamp z wiadomości
-  auto received_stamp = msg->header.stamp;
+  // Nowa pozycja z VO
+  Eigen::Vector3d new_pose = Eigen::Vector3d(msg->pose.position.x,
+                                              msg->pose.position.y,
+                                              msg->pose.position.z);
   
-  // Przygotuj wiadomość do publikacji
-  tf2_msgs::msg::TFMessage tf_msg;
-  geometry_msgs::msg::TransformStamped transform;
+  // Pierwsza iteracja - inicjalizacja
+  if (!has_initial_data_) {
+    vo_pose_ = new_pose;
+    last_time_ = msg->header.stamp;
+    has_initial_data_ = true;
+    RCLCPP_INFO(this->get_logger(), "Initial pose received");
+    return;
+  }
+  
+  // Obliczanie delta czasu
+  rclcpp::Time current_time = msg->header.stamp;
+  double dt = (current_time - last_time_).seconds();
+  
+  if (dt <= 0.0 || dt > 1.0) {
+    RCLCPP_WARN(this->get_logger(), "Invalid dt: %.6f, skipping", dt);
+    last_time_ = current_time;
+    return;
+  }
+  
+  // Obliczanie prędkości: v = (pose - prev_pose) / dt
+  Eigen::Vector3d new_velocity = (new_pose - vo_pose_) / dt;
+  
+  // Obliczanie przyspieszenia: a = (velocity - prev_velocity) / dt
+  Eigen::Vector3d new_acceleration = (new_velocity - vo_velocity_) / dt;
+  
+  // Sprawdzenie czy mamy wystarczające przyspieszenie do obliczeń
+  if (new_acceleration.norm() > 0.1 && imu_acceleration_.norm() > 0.1) {
+    vo_acceleration_ = new_acceleration;
     
-  // Użyj timestamp z /vo_pose
-  transform.header.stamp = received_stamp;
-  transform.header.frame_id = "world";
-  transform.child_frame_id = "dworld";
+    RCLCPP_INFO(this->get_logger(), 
+                "VO accel: [%.3f, %.3f, %.3f], IMU accel: [%.3f, %.3f, %.3f]",
+                vo_acceleration_.x(), vo_acceleration_.y(), vo_acceleration_.z(),
+                imu_acceleration_.x(), imu_acceleration_.y(), imu_acceleration_.z());
     
-  // Translacja
-  transform.transform.translation.x = 0.0;
-  transform.transform.translation.y = 0.0;
-  transform.transform.translation.z = 0.0;
+    // Wywołanie funkcji obliczającej orientację
+    calculate_orientation_from_imu();
     
-  // Rotacja (quaternion)
-  transform.transform.rotation.x = quaternion_x_;
-  transform.transform.rotation.y = quaternion_y_;
-  transform.transform.rotation.z = quaternion_z_;
-  transform.transform.rotation.w = quaternion_w_;
-    
-  tf_msg.transforms.push_back(transform);
-    
-  publisher_tf_static_->publish(tf_msg);
-    
-  RCLCPP_DEBUG(this->get_logger(), "Published /tf_static with timestamp: %d.%09d", 
-               received_stamp.sec, received_stamp.nanosec);
+    // Jeśli obliczono orientację, publikuj tf_static
+    if (!static_tf_sent_) {
+      // Przygotuj wiadomość do publikacji
+      tf2_msgs::msg::TFMessage tf_msg;
+      geometry_msgs::msg::TransformStamped transform;
+        
+      // Użyj timestamp z /vo_pose
+      transform.header.stamp = current_time;
+      transform.header.frame_id = "world";
+      transform.child_frame_id = "dworld";
+        
+      // Translacja (brak)
+      transform.transform.translation.x = 0.0;
+      transform.transform.translation.y = 0.0;
+      transform.transform.translation.z = 0.0;
+        
+      // Rotacja (quaternion)
+      transform.transform.rotation.x = q_orientation_.x();
+      transform.transform.rotation.y = q_orientation_.y();
+      transform.transform.rotation.z = q_orientation_.z();
+      transform.transform.rotation.w = q_orientation_.w();
+        
+      tf_msg.transforms.push_back(transform);
+        
+      publisher_tf_static_->publish(tf_msg);
+      static_tf_sent_ = false;
+      
+      RCLCPP_INFO(this->get_logger(), 
+                  "Published static TF with quaternion: [x=%.6f, y=%.6f, z=%.6f, w=%.6f]",
+                  q_orientation_.x(), q_orientation_.y(), 
+                  q_orientation_.z(), q_orientation_.w());
+    }
+  }
+  
+  // Aktualizacja stanu dla następnej iteracji
+  prev_vo_velocity_ = vo_velocity_;
+  vo_velocity_ = new_velocity;
+  prev_vo_pose_ = vo_pose_;
+  vo_pose_ = new_pose;
+  last_time_ = current_time;
 }
 
 void TfStaticPublisher::imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) 
 {
-  // Pobranie aktualnego czasu
-  static rclcpp::Time prev_time = this->now();
-  rclcpp::Time current_time = this->now();
-  
-  // Obliczenie delty czasu w sekundach
-  double dt = (current_time - prev_time).seconds();
-  
-  // Pomiń pierwszą iterację (dt = 0)
-  if (dt <= 0.0) {
-    prev_time = current_time;
-    return;
-  }
-  
-  // Inicjalizacja wektorów jeśli są puste (statyczne zmienne zachowują stan)
-  static std::vector<double> velocity = {0.0, 0.0, 0.0};
-  static std::vector<double> prev_acceleration = {0.0, 0.0, 0.0};
-  static std::vector<double> prev_velocity = {0.0, 0.0, 0.0};
-  
-  // Pobranie przyspieszenia liniowego z wiadomości IMU
-  double ax = msg->linear_acceleration.x;
-  double ay = msg->linear_acceleration.y;
-  double az = msg->linear_acceleration.z - 9.81;  //WAŻNE: Odejmij grawitację od osi Z!
-  
-  // Krok 1: Całkowanie przyspieszenia do prędkości metodą trapezów
-  // v(t) = v(t-1) + (a(t) + a(t-1)) * dt / 2
-  velocity[0] += (ax + prev_acceleration[0]) * dt / 2.0;
-  velocity[1] += (ay + prev_acceleration[1]) * dt / 2.0;
-  velocity[2] += (az + prev_acceleration[2]) * dt / 2.0;
-  
-  // Krok 2: Całkowanie prędkości do pozycji metodą trapezów
-  // s(t) = s(t-1) + (v(t) + v(t-1)) * dt / 2
-  // TYLKO X i Y dla łódki (porusza się po płaszczyźnie XY)
-  imu[0] = prev_imu[0] + (velocity[0] + prev_velocity[0]) * dt / 2.0;
-  imu[1] = prev_imu[1] + (velocity[1] + prev_velocity[1]) * dt / 2.0;
-  imu[2] = 0.0;  // Z zawsze = 0 dla łódki na wodzie!
-  
-  // Aktualizacja poprzednich wartości
-  prev_imu = imu;
-  prev_acceleration = {ax, ay, az};
-  prev_velocity = velocity;
-  
-  // Aktualizacja czasu
-  prev_time = current_time;
-  
-  RCLCPP_DEBUG(this->get_logger(), "IMU position: x=%.3f, y=%.3f, z=%.3f", 
-               imu[0], imu[1], imu[2]);
+  imu_acceleration_ = Eigen::Vector3d(
+    msg->linear_acceleration.x,
+    msg->linear_acceleration.y,
+    msg->linear_acceleration.z);
+}
+
+Eigen::Quaterniond TfStaticPublisher::calculateRotationQuaternion(
+    const Eigen::Vector3d& imu_vec_raw,
+    const Eigen::Vector3d& vo_pose_raw)
+{
+    // Normalizacja wektorów
+    Eigen::Vector3d imu_vec = imu_vec_raw.normalized();
+    Eigen::Vector3d vo_pose = vo_pose_raw.normalized();
+    
+    // Obliczanie kąta między wektorami
+    double dot_product = vo_pose.dot(imu_vec);
+    dot_product = std::clamp(dot_product, -1.0, 1.0);
+    double angle = std::acos(dot_product);
+    
+    // Obliczanie osi rotacji (iloczyn wektorowy)
+    Eigen::Vector3d rotation_axis = vo_pose.cross(imu_vec);
+    double axis_norm = rotation_axis.norm();
+    
+    // Obsługa przypadków współliniowych
+    if (axis_norm < 1e-6) {
+        if (dot_product > 0) {
+            // Wektory równoległe - brak rotacji
+            return Eigen::Quaterniond::Identity();
+        } else {
+            // Wektory antyrównoległe - rotacja o 180 stopni
+            // Znajdź oś prostopadłą do vo_pose
+            rotation_axis = vo_pose.cross(Eigen::Vector3d(1, 0, 0));
+            if (rotation_axis.norm() < 1e-6) {
+                rotation_axis = vo_pose.cross(Eigen::Vector3d(0, 1, 0));
+            }
+            rotation_axis.normalize();
+            angle = M_PI;
+        }
+    } else {
+        rotation_axis.normalize();
+    }
+    
+    // Tworzenie kwaterniona z osi i kąta
+    Eigen::AngleAxisd angle_axis(angle, rotation_axis);
+    Eigen::Quaterniond quaternion(angle_axis);
+    
+    return quaternion;
 }
 
 void TfStaticPublisher::calculate_orientation_from_imu()
 {
   RCLCPP_INFO(this->get_logger(), "Calculating orientation from IMU and VO data");
+  
   // Sprawdzenie czy mamy dane
-  if (imu.size() < 3 || prev_iter_imu.size() < 3 || 
-      pose.size() < 3 || prev_pose.size() < 3) {
-    RCLCPP_WARN(this->get_logger(), "Not enough data for orientation calculation");
+  if (imu_acceleration_.norm() < 1e-6 || vo_acceleration_.norm() < 1e-6) {
+    RCLCPP_WARN(this->get_logger(), "Not enough acceleration data for orientation calculation");
     return;
   }
 
-  // Konwersja danych do Eigen
-  Eigen::Vector3d imu_vec(imu[0], imu[1], imu[2]);
-  Eigen::Vector3d prev_iter_imu_vec(prev_iter_imu[0], prev_iter_imu[1], prev_iter_imu[2]);
-  Eigen::Vector3d vo_pose(pose[0], pose[1], pose[2]);
-  Eigen::Vector3d prev_vo_pose(prev_pose[0], prev_pose[1], prev_pose[2]);
-
-  // Sprawdzenie czy dane się zmieniły
-  if ((imu_vec - prev_iter_imu_vec).norm() < 1e-6 || 
-      (vo_pose - prev_vo_pose).norm() < 1e-6) {
-    RCLCPP_DEBUG(this->get_logger(), "Skipping: no significant change in data");
-    return;
-  }
-
-  // Normalizacja i obliczenie przyrostów
-  Eigen::Vector3d imu_norm = imu_vec.normalized();
-  Eigen::Vector3d prev_iter_imu_norm = prev_iter_imu_vec.normalized();
-  Eigen::Vector3d vo_norm = vo_pose.normalized();
-  Eigen::Vector3d prev_vo_norm = prev_vo_pose.normalized();
-
-  Eigen::Vector3d d_imu = (imu_norm - prev_iter_imu_norm);
-  Eigen::Vector3d d_vo = (vo_norm - prev_vo_norm);
-
-  // Sprawdzenie czy przyrosty nie są zbyt małe
-  if (d_imu.norm() < 1e-6 || d_vo.norm() < 1e-6) {
-    RCLCPP_DEBUG(this->get_logger(), "Skipping orientation calculation: increments too small");
-    return;
-  }
-
-  d_imu.normalize();
-  d_vo.normalize();
-
-  // Sprawdzenie czy kierunki się nie pokrywają (iloczyn skalarny bliski 1 lub -1)
-  double dot_product_imu = imu_norm.dot(d_imu);
-  double dot_product_vo = vo_norm.dot(d_vo);
+  // Obliczenie kwaternionu rotacji
+  q_orientation_ = calculateRotationQuaternion(imu_acceleration_, vo_acceleration_);
   
-  const double threshold = 0.95; // Próg podobieństwa (cosinus ~18 stopni)
-  
-  if (std::abs(dot_product_imu) > threshold || std::abs(dot_product_vo) > threshold) {
-    RCLCPP_DEBUG(this->get_logger(), 
-                 "Skipping orientation calculation: directions too similar (IMU: %.3f, VO: %.3f)",
-                 dot_product_imu, dot_product_vo);
-    return;
-  }
-
-  // Parametry do optymalizacji: [roll, pitch, yaw]
-  double angles[3] = {0.0, 0.0, 0.0};
-
-  // Konfiguracja problemu Ceres
-  ceres::Problem problem;
-  
-  ceres::CostFunction* cost_function =
-      new ceres::AutoDiffCostFunction<OrientationCostFunctor, 1, 3>(
-          new OrientationCostFunctor(imu_vec, prev_iter_imu_vec, vo_pose, prev_vo_pose));
-
-  problem.AddResidualBlock(cost_function, nullptr, angles);
-
-  // Ograniczenia na kąty
-  problem.SetParameterLowerBound(angles, 0, -M_PI);      // roll
-  problem.SetParameterUpperBound(angles, 0, M_PI);
-  problem.SetParameterLowerBound(angles, 1, -M_PI/2);    // pitch
-  problem.SetParameterUpperBound(angles, 1, M_PI/2);
-  problem.SetParameterLowerBound(angles, 2, -M_PI);      // yaw
-  problem.SetParameterUpperBound(angles, 2, M_PI);
-
-  // Opcje solvera
-  ceres::Solver::Options options;
-  options.linear_solver_type = ceres::DENSE_QR;
-  options.minimizer_progress_to_stdout = false;
-  options.max_num_iterations = 100;
-
-  ceres::Solver::Summary summary;
-  ceres::Solve(options, &problem, &summary);
-
-  if (summary.termination_type == ceres::CONVERGENCE) {
-    // Obliczenie macierzy rotacji z kątów Eulera
-    double c_phi = cos(angles[0]);
-    double s_phi = sin(angles[0]);
-    double c_theta = cos(angles[1]);
-    double s_theta = sin(angles[1]);
-    double c_psi = cos(angles[2]);
-    double s_psi = sin(angles[2]);
-
-    Eigen::Matrix3d R;
-    R(0, 0) = c_theta * c_psi;
-    R(0, 1) = c_theta * s_psi;
-    R(0, 2) = -s_theta;
-
-    R(1, 0) = s_phi * s_theta * c_psi - c_phi * s_psi;
-    R(1, 1) = s_phi * s_theta * s_psi + c_phi * c_psi;
-    R(1, 2) = s_phi * c_theta;
-
-    R(2, 0) = c_phi * s_theta * c_psi + s_phi * s_psi;
-    R(2, 1) = c_phi * s_theta * s_psi - s_phi * c_psi;
-    R(2, 2) = c_phi * c_theta;
-
-    // Konwersja macierzy rotacji na kwaternion
-    Eigen::Quaterniond q(R);
-
-    // Zapisanie kwaternionu
-    quaternion_x_ = q.x();
-    quaternion_y_ = q.y();
-    quaternion_z_ = q.z();
-    quaternion_w_ = q.w();
-
-    RCLCPP_INFO(this->get_logger(), 
-                "Orientation calculated - Quaternion: x=%.6f, y=%.6f, z=%.6f, w=%.6f",
-                quaternion_x_, quaternion_y_, quaternion_z_, quaternion_w_);
-  } else {
-    RCLCPP_WARN(this->get_logger(), "Orientation optimization failed");
-  }
+  RCLCPP_INFO(this->get_logger(), 
+              "Orientation calculated - Quaternion: x=%.6f, y=%.6f, z=%.6f, w=%.6f",
+              q_orientation_.x(), q_orientation_.y(), 
+              q_orientation_.z(), q_orientation_.w());
 }
 
 int main(int argc, char * argv[])

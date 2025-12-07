@@ -102,6 +102,7 @@ find_package(tf2_ros REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(backward_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 ###########
 ## Build ##
@@ -261,6 +262,35 @@ ament_target_dependencies(feeder_imu
 
 install(TARGETS
   feeder_imu
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(imu_transform src/imu_transform.cpp)
+
+ament_target_dependencies(imu_transform
+  rclcpp
+  tf2_msgs
+  geometry_msgs
+  sensor_msgs
+  tf2
+  tf2_geometry_msgs
+)
+
+target_link_libraries(imu_transform
+  Eigen3::Eigen
+  Sophus::Sophus
+  Ceres::ceres
+)
+
+target_include_directories(imu_transform
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+    ${EIGEN3_INCLUDE_DIRS}
+    ${CERES_INCLUDE_DIRS}
+)
+
+install(TARGETS
+  imu_transform
   DESTINATION lib/${PROJECT_NAME}
 )
 
