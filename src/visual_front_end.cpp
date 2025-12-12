@@ -34,7 +34,8 @@
 
 VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, 
         std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker)
-    : pslamstate_(pstate), pcurframe_(pframe), pmap_(pmap), ptracker_(ptracker)
+    : pslamstate_(pstate), pcurframe_(pframe), pmap_(pmap), ptracker_(ptracker),
+      cam_rot_("/datasets/custom_params.yaml")
 {}
 
 bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
@@ -75,6 +76,13 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 
     // Create KF if 1st frame processed
     if( pcurframe_->id_ == 0 ) {
+        Sophus::SE3d Twc = pcurframe_->getTwc();
+        if (!cam_rot_.done) {
+            Sophus::SO3d Tstatic_rot = Twc.so3() * cam_rot_.get_rotation();
+            Sophus::SE3d Twc_staticrot(Tstatic_rot, Twc.translation());
+            pcurframe_->setTwc(Twc_staticrot);
+            cam_rot_.done = true;
+        } 
         return true;
     }
     
@@ -763,6 +771,7 @@ void VisualFrontEnd::computePose()
         // Pose seems to be OK!
 
         // Update frame pose
+
         pcurframe_->setTwc(Twc);
 
         // Remove outliers before PnP refinement (a bit dirty)
@@ -834,6 +843,7 @@ void VisualFrontEnd::computePose()
     // Pose seems to be OK!
 
     // Update frame pose
+
     pcurframe_->setTwc(Twc);
 
     // Set p3p req to false as it is triggered either because

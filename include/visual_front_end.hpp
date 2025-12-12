@@ -35,6 +35,8 @@
 #include "map_manager.hpp"
 #include "feature_tracker.hpp"
 
+#include "camera_rotation.hpp"
+
 class MotionModel {
 
 public:
@@ -94,7 +96,7 @@ class VisualFrontEnd {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    VisualFrontEnd() {}
+    //VisualFrontEnd() {}
     VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframerame, 
         std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker);
 
@@ -140,4 +142,6 @@ public:
     MotionModel motion_model_;
 
     bool bp3preq_ = false; 
+
+    CameraRotation cam_rot_;
 };
