@@ -265,6 +265,19 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(feeder_gt src/feeder_gt.cpp)
+
+ament_target_dependencies(feeder_gt
+  rclcpp
+  geometry_msgs
+  visualization_msgs
+)
+
+install(TARGETS
+  feeder_gt
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 add_executable(imu_transform src/imu_transform.cpp)
 
 ament_target_dependencies(imu_transform

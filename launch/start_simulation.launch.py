@@ -62,6 +62,21 @@ def generate_launch_description():
         default_value='/datasets/ahrs.txt',
         description='enables imu feeder'
     )
+    enable_gt_arg = DeclareLaunchArgument(
+        'enable_gt',
+        default_value='true',
+        description='enables ground truth feeder'
+    )
+    gt_path_arg = DeclareLaunchArgument(
+        'gt_path',
+        default_value='/datasets/gt.txt',
+        description='Path to the ground truth file: timestamp x y z qx qy qz qw'
+    )
+    gt_zero_origin_arg = DeclareLaunchArgument(
+        'gt_zero_origin',
+        default_value='true',
+        description='Subtract first GT pose as origin (true) or keep absolute coordinates (false)'
+    )
 
     # Konfiguracja
     params_file = LaunchConfiguration('params_file')
@@ -75,6 +90,9 @@ def generate_launch_description():
     loop = LaunchConfiguration('loop')
     enable_imu = LaunchConfiguration('enable_imu')
     imu_path = LaunchConfiguration('imu_path')
+    enable_gt = LaunchConfiguration('enable_gt')
+    gt_path = LaunchConfiguration('gt_path')
+    gt_zero_origin = LaunchConfiguration('gt_zero_origin')
 
     # Node: OV2SLAM
     ov2slam_node = Node(
@@ -134,6 +152,23 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    feeder_gt_node = Node(
+        package='ov2slam',
+        executable='feeder_gt',
+        name='feeder_gt',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'loop': loop,
+            'gt_path': gt_path,
+            'frame_id': 'world',
+            'zero_origin': gt_zero_origin,
+        }],
+        condition=IfCondition(enable_gt),
+        respawn=False,
+        emulate_tty=True,
+    )
+
     # Node: RViz2 z software rendering dla Dockera
     rviz_node = Node(
         package='rviz2',
@@ -152,7 +187,8 @@ def generate_launch_description():
     # Opóźnij start FEEDER_PNG o 3 sekundy
     delayed_feeder = TimerAction(
         period=3.0,
-        actions=[feeder_png_node, feeder_imu_node, imu_transform_node]
+        actions=[feeder_png_node, feeder_imu_node, imu_transform_node, feeder_gt_node]
+        # actions=[feeder_gt_node]
     )
 
     # Opóźnij start RViz o 2 sekundy
@@ -179,6 +215,9 @@ def generate_launch_description():
         loop_arg,
         enable_imu_arg,
         imu_path_arg,
+        enable_gt_arg,
+        gt_path_arg,
+        gt_zero_origin_arg,
         # Nodes
         ov2slam_node,
         delayed_rviz,
