@@ -41,6 +41,8 @@ Został utworzony plik launch, który uruchamia wszystkie potrzebne node do dzia
 | params_file | ścieżka do pliku configuracyjnego .yaml do ov2slam | /datasets/custom_params.yaml |
 | enable_rviz | false - symulacja bez wizualizacji, true - symulacja z wizualizacją | true |
 | loop | false - symulajca wykona się raz, true - symulacja odpala się w pętli do wystąpnia przerwania z ^C | true |
+| playback_speed | mnożnik prędkości odtwarzania (1.0 = realtime) | 1.0 |
+| start_timestamp | unix time (s) od którego startuje odtwarzanie datasetu; <0 wyłączone | -1.0 |
 | enable_imu | false - nie odpali się node wrzucający dane imu, true - uruchomi się node wrzucający dane imu | true |
 | imu_path | ścieżka do pliku zawierającego dane z imu | /datasets/ahrs.txt |
 
