@@ -105,6 +105,15 @@ public:
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(n_);
     }
 
+    static rclcpp::Time stampFromSeconds(const double time_sec)
+    {
+        // OV2SLAM receives image timestamps from message headers (see ov2slam_node.cpp sync_process()).
+        // For downstream sync (CSV logging, GT overlay, TF queries) we must stamp VO outputs with the same
+        // measurement time, not with "now()".
+        const int64_t ns = static_cast<int64_t>(time_sec * 1e9);
+        return rclcpp::Time(ns, RCL_SYSTEM_TIME);
+    }
+
     void pubTrackImage(const cv::Mat &imgTrack, const double time)
     {
         if( pub_image_track_->get_subscription_count() == 0 ) {
@@ -113,16 +122,18 @@ public:
 
         std_msgs::msg::Header header;
         header.frame_id = "world";
-        header.stamp = n_->get_clock()->now();
+        header.stamp = stampFromSeconds(time);
         sensor_msgs::msg::Image::SharedPtr imgTrackMsg = cv_bridge::CvImage(header, "rgb8", imgTrack).toImageMsg();
         pub_image_track_->publish(*imgTrackMsg);
     }
 
     void pubVO(const Sophus::SE3d &Twc, const double time)
     {   
+        const auto stamp = stampFromSeconds(time);
+
         // 1. Publish marker message
         // =========================
-        vo_traj_msg_.header.stamp = n_->get_clock()->now();
+        vo_traj_msg_.header.stamp = stamp;
         vo_traj_msg_.header.frame_id = "world";
 
         geometry_msgs::msg::Point p;
@@ -158,7 +169,7 @@ public:
         pub_vo_pose_->publish(Twc_msg);
 
         geometry_msgs::msg::TransformStamped t;
-        t.header.stamp = n_->get_clock()->now();
+        t.header.stamp = stamp;
         t.header.frame_id = "world";
         t.child_frame_id = "camera";
 
@@ -221,7 +232,7 @@ public:
 
         std_msgs::msg::Header header;
         header.frame_id = "world";
-        header.stamp = n_->get_clock()->now();
+        header.stamp = stampFromSeconds(time);
 
         visualization_msgs::msg::MarkerArray markerArray_msg;
 
@@ -251,7 +262,7 @@ public:
 
         pcl::toROSMsg(*pcloud, pc2_msg_);
         pc2_msg_.header.frame_id = "world";
-        pc2_msg_.header.stamp = n_->get_clock()->now();
+        pc2_msg_.header.stamp = stampFromSeconds(time);
         pub_point_cloud_->publish(pc2_msg_);
     }
 
@@ -275,7 +286,7 @@ public:
             return;
         }
 
-        kfs_traj_msg_.header.stamp = n_->get_clock()->now();
+        kfs_traj_msg_.header.stamp = stampFromSeconds(time);
         kfs_traj_msg_.header.frame_id = "world";
 
         pub_kfs_traj_->publish(kfs_traj_msg_);
@@ -287,7 +298,7 @@ public:
             return;
         }
 
-        final_kfs_traj_msg_.header.stamp = n_->get_clock()->now();
+        final_kfs_traj_msg_.header.stamp = stampFromSeconds(time);
         final_kfs_traj_msg_.header.frame_id = "world";
 
         geometry_msgs::msg::Point p;

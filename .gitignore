@@ -312,3 +312,11 @@ AMENT_IGNORE
 
 # Ignore ov2slam results files
 *.txt
+
+# Local runtime/config files (do not commit)
+docker/.env
+docker/datasets/
+trajectory/
+package.json
+package-lock.json
+docs/

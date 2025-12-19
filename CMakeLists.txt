@@ -223,6 +223,12 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
+install(FILES
+  ov2slam_visualization.rviz
+  ov2slam_visualization_world_ahrs.rviz
+  DESTINATION share/${PROJECT_NAME}
+)
+
 install(TARGETS
   ${PROJECT_NAME}_node
   DESTINATION lib/${PROJECT_NAME}
@@ -265,32 +271,72 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-add_executable(imu_transform src/imu_transform.cpp)
+add_executable(feeder_gt src/feeder_gt.cpp)
 
-ament_target_dependencies(imu_transform
+ament_target_dependencies(feeder_gt
   rclcpp
-  tf2_msgs
   geometry_msgs
-  sensor_msgs
-  tf2
-  tf2_geometry_msgs
-)
-
-target_link_libraries(imu_transform
-  Eigen3::Eigen
-  Sophus::Sophus
-  Ceres::ceres
-)
-
-target_include_directories(imu_transform
-  PRIVATE
-    ${PROJECT_SOURCE_DIR}/include/
-    ${EIGEN3_INCLUDE_DIRS}
-    ${CERES_INCLUDE_DIRS}
+  visualization_msgs
 )
 
 install(TARGETS
-  imu_transform
+  feeder_gt
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(feeder_dataset src/feeder_dataset.cpp)
+
+ament_target_dependencies(feeder_dataset
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  visualization_msgs
+)
+
+target_include_directories(feeder_dataset
+  PRIVATE
+    ${PROJECT_SOURCE_DIR}/include/
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(feeder_dataset
+  ${OpenCV_LIBRARIES}
+)
+
+install(TARGETS
+  feeder_dataset
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(trajectory_csv_logger src/trajectory_csv_logger.cpp)
+
+ament_target_dependencies(trajectory_csv_logger
+  rclcpp
+  geometry_msgs
+)
+
+install(TARGETS
+  trajectory_csv_logger
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(ahrs_align_tf src/ahrs_align_tf.cpp)
+
+ament_target_dependencies(ahrs_align_tf
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+)
+
+target_link_libraries(ahrs_align_tf
+  Eigen3::Eigen
+)
+
+install(TARGETS
+  ahrs_align_tf
   DESTINATION lib/${PROJECT_NAME}
 )
 
