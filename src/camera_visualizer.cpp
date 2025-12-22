@@ -28,6 +28,9 @@
 // (derived from https://github.com/HKUST-Aerial-Robotics/VINS-Mono)
 
 
+#ifdef STANDALONE
+#include "stub_ros_visualizer.hpp"
+#endif
 #include "camera_visualizer.hpp"
 
 const Eigen::Vector3d CameraPoseVisualization::imlt = Eigen::Vector3d(-1.0, -0.5, 1.0);

@@ -291,7 +291,8 @@ public:
 };
 
 // Has to be defined before being used
-std::vector<SE3Pose> Logger::vse3pose_, Logger::vfullse3pose_;
-std::map<double, SE3Pose>  Logger::vse3kfpose_;
-std::vector<KittiPose> Logger::vkittipose_;
-std::vector<FramePose> Logger::vframepose_;
+// inline for C++17 to avoid multiple definition errors
+inline std::vector<SE3Pose> Logger::vse3pose_, Logger::vfullse3pose_;
+inline std::map<double, SE3Pose>  Logger::vse3kfpose_;
+inline std::vector<KittiPose> Logger::vkittipose_;
+inline std::vector<FramePose> Logger::vframepose_;

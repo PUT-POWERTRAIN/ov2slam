@@ -29,6 +29,8 @@
 #include "ceres_parametrization.hpp"
 
 #include <thread>
+#include <fstream>
+#include <iomanip>
 
 
 void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)

@@ -26,6 +26,10 @@
 
 #include <opencv2/highgui.hpp>
 
+#ifdef STANDALONE
+#include "stub_ros_visualizer.hpp"
+#endif
+
 #include "multi_view_geometry.hpp"
 
 #include "map_manager.hpp"

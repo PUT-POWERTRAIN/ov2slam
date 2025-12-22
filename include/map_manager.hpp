@@ -29,7 +29,12 @@
 #include <mutex>
 #include <unordered_map>
 
+#ifdef STANDALONE
+// Include stub with pcl definitions
+#include "stub_ros_visualizer.hpp"
+#else
 #include <pcl_ros/point_cloud.h>
+#endif
 
 #include "slam_params.hpp"
 #include "frame.hpp"

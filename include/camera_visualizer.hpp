@@ -27,10 +27,14 @@
 #pragma once
 
 
+#ifdef STANDALONE
+// Use stub definitions from ros_visualizer.hpp
+#else
 #include <ros/ros.h>
 #include <std_msgs/ColorRGBA.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
+#endif
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
