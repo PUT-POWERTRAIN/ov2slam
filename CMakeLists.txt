@@ -26,6 +26,13 @@ endif()
 # Standalone mode (no ROS)
 add_definitions(-DSTANDALONE)
 
+# Profiling support
+option(ENABLE_PROFILING "Enable synchronization profiling" OFF)
+if(ENABLE_PROFILING)
+    add_definitions(-DENABLE_PROFILING)
+    message(STATUS "Profiling enabled")
+endif()
+
 # OpenCV 2.x to 4.x compatibility
 add_definitions(-DCV_GRAY2RGB=cv::COLOR_GRAY2BGR)
 add_definitions(-DCV_RGB2GRAY=cv::COLOR_RGB2GRAY)
