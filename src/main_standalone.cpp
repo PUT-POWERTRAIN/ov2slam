@@ -21,6 +21,12 @@
 #include "ov2slam.hpp"
 #include "slam_params.hpp"
 
+#ifdef ENABLE_PROFILING
+#include "sync_profiler.hpp"
+#endif
+
+#include "async_image_loader_parallel.hpp"
+
 // Use stub ros_visualizer instead of real ROS
 #define USE_STUB_VISUALIZER
 
@@ -55,9 +61,11 @@ std::vector<std::pair<double, std::string>> readTimestamps(const std::string& fi
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cout << "\n===== OV2SLAM Standalone =====\n";
-        std::cout << "Usage: " << argv[0] << " <parameters_file.yaml> <dataset_path>\n";
+        std::cout << "Usage: " << argv[0] << " <parameters_file.yaml> <dataset_path> [max_images]\n";
         std::cout << "\nExample:\n";
-        std::cout << "  " << argv[0] << " parameters_files/pohang00.yaml ~/datasets/pohang00\n";
+        std::cout << "  " << argv[0] << " parameters_files/pohang00.yaml ~/datasets/pohang00 200\n";
+        std::cout << "\nOptions:\n";
+        std::cout << "  max_images  - Limit number of images to process (default: all)\n";
         std::cout << "\nOutput files:\n";
         std::cout << "  - ov2slam_trajectory.txt (VO trajectory)\n";
         std::cout << "  - ov2slam_keyframes.txt (keyframe poses)\n";
@@ -67,6 +75,13 @@ int main(int argc, char** argv) {
 
     std::string parameters_file = argv[1];
     std::string dataset_path = argv[2];
+
+    // Optional limit on number of images
+    size_t max_images = SIZE_MAX;
+    if (argc >= 4) {
+        max_images = std::stoul(argv[3]);
+        std::cout << "Limiting to first " << max_images << " images\n";
+    }
 
     std::cout << "\n========================================\n";
     std::cout << "     OV2SLAM Standalone Mode\n";
@@ -111,38 +126,61 @@ int main(int argc, char** argv) {
     std::string left_dir = dataset_path + "/stereo/left_images/";
     std::string right_dir = dataset_path + "/stereo/right_images/";
 
+    // Limit number of images if specified
+    size_t num_to_process = std::min(timestamps.size(), max_images);
+
     // Process images
-    std::cout << "\nProcessing " << timestamps.size() << " image pairs..." << std::endl;
+    std::cout << "\nProcessing " << num_to_process << " of " << timestamps.size() << " image pairs..." << std::endl;
     std::cout << "Press Ctrl+C to stop early\n" << std::endl;
+
+    // Create and start async image loader with parallel PNG decompression
+    // buffer_size=8, num_threads=16 for maximum parallelism
+    AsyncImageLoaderParallel loader(left_dir, right_dir, timestamps, 8, 16);
+    loader.start();
+    std::cout << "[AsyncImageLoaderParallel] Started with 16 threads, 8-frame buffer\n";
 
     auto start_time = std::chrono::steady_clock::now();
 
-    for (size_t i = 0; i < timestamps.size(); i++) {
-        double ts = timestamps[i].first;
-        std::string img_name = timestamps[i].second;
+    {
+        PROFILE_SCOPE("main_processing_loop");
 
-        // Load images
-        std::string left_path = left_dir + img_name + ".png";
-        std::string right_path = right_dir + img_name + ".png";
+        size_t processed = 0;
+        while (processed < num_to_process) {
+            double ts;
+            cv::Mat left_img, right_img;
 
-        cv::Mat left_img = cv::imread(left_path, cv::IMREAD_GRAYSCALE);
-        cv::Mat right_img = cv::imread(right_path, cv::IMREAD_GRAYSCALE);
+            // Try to get next pre-loaded image (non-blocking)
+            {
+                PROFILE_SCOPE("get_from_async_queue");
+                while (!loader.tryGet(ts, left_img, right_img)) {
+                    if (!loader.hasMore()) {
+                        goto done;  // No more images
+                    }
+                    // Image not ready yet, retry immediately (busy-wait)
+                    // In production, this should yield or sleep
+                }
+            }
 
-        if (left_img.empty() || right_img.empty()) {
-            std::cerr << "Failed to read image pair: " << img_name << std::endl;
-            continue;
-        }
+            // Add to SLAM
+            {
+                PROFILE_SCOPE("add_to_slam");
+                slam.addNewStereoImages(ts, left_img, right_img);
+            }
 
-        // Add to SLAM
-        slam.addNewStereoImages(ts, left_img, right_img);
+            processed++;
 
-        if ((i + 1) % 100 == 0) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::steady_clock::now() - start_time).count();
-            std::cout << "Processed " << (i + 1) << "/" << timestamps.size()
-                     << " images (elapsed: " << elapsed << "s)" << std::endl;
-        }
-    }
+            if (processed % 100 == 0) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start_time).count();
+                std::cout << "Processed " << processed << "/" << num_to_process
+                         << " images (elapsed: " << (elapsed / 1000.0) << "s, "
+                         << "fps: " << (processed * 1000.0 / elapsed) << ")" << std::endl;
+            }
+        }  // End while loop
+        done:;
+        // Stop async loader
+        loader.stop();
+    }  // PROFILE_SCOPE("main_processing_loop")
 
     auto total_time = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start_time).count();
@@ -150,7 +188,7 @@ int main(int argc, char** argv) {
     std::cout << "\n========================================\n";
     std::cout << "Finished processing all images!\n";
     std::cout << "Total time: " << total_time << "s\n";
-    std::cout << "Average: " << (timestamps.size() / std::max(1.0, (double)total_time)) << " fps\n";
+    std::cout << "Average: " << (num_to_process / std::max(1.0, (double)total_time)) << " fps\n";
     std::cout << "========================================\n\n";
 
     std::cout << "Shutting down SLAM..." << std::endl;
@@ -174,6 +212,11 @@ int main(int argc, char** argv) {
     std::cout << "  - ov2slam_trajectory.txt\n";
     std::cout << "  - ov2slam_keyframes.txt\n";
     std::cout << "  - ov2slam_full_trajectory.txt\n";
+
+#ifdef ENABLE_PROFILING
+    std::cout << "\n";
+    SyncProfiler::getInstance().generateReport();
+#endif
 
     return 0;
 }

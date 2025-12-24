@@ -28,6 +28,10 @@
 
 #include "map_point.hpp"
 
+#ifdef ENABLE_PROFILING
+#include "sync_profiler.hpp"
+#endif
+
 
 MapPoint::MapPoint(const int lmid, const int kfid, const bool bobs)
     : lmid_(lmid), isobs_(bobs), kfid_(kfid), invdepth_(-1.)

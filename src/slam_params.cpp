@@ -26,6 +26,32 @@
 
 #include "slam_params.hpp"
 
+// Helper function to normalize rotation matrix using SVD
+// This ensures the matrix is orthogonal (R^T * R = I) to satisfy Sophus validation
+Eigen::Matrix4d normalizeTransform(const Eigen::Matrix4d& T) {
+    Eigen::Matrix3d R = T.block<3,3>(0,0);
+    Eigen::Vector3d t = T.block<3,1>(0,3);
+
+    // SVD decomposition: R = U * S * V^T
+    Eigen::JacobiSVD<Eigen::Matrix3d> svd(R, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+    // Closest orthogonal matrix to R is U * V^T
+    Eigen::Matrix3d R_normalized = svd.matrixU() * svd.matrixV().transpose();
+
+    // Ensure proper rotation (det = +1, not -1)
+    if (R_normalized.determinant() < 0) {
+        R_normalized = -R_normalized;
+    }
+
+    // Reconstruct the 4x4 transformation matrix
+    Eigen::Matrix4d T_normalized;
+    T_normalized.setIdentity();
+    T_normalized.block<3,3>(0,0) = R_normalized;
+    T_normalized.block<3,1>(0,3) = t;
+
+    return T_normalized;
+}
+
 SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
 
     std::cout << "\nSLAM Parameters are being setup...\n";
@@ -83,6 +109,11 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
 
         cv::cv2eigen(cvTbc0,Tbc0);
         cv::cv2eigen(cvTbc1,Tbc1);
+
+        // Normalize rotation matrices to ensure orthogonality for Sophus
+        // This fixes numerical precision issues from YAML -> OpenCV -> Eigen conversion
+        Tbc0 = normalizeTransform(Tbc0);
+        Tbc1 = normalizeTransform(Tbc1);
 
         T_left_right_ = Sophus::SE3d(Tbc0.inverse() * Tbc1);
     }

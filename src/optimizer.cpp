@@ -32,9 +32,13 @@
 #include <fstream>
 #include <iomanip>
 
+#include "sync_profiler.hpp"
+
 
 void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.BA_SetupPb");
 
@@ -459,7 +463,7 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
         options.use_nonmonotonic_steps = true;
     }
 
-    options.num_threads = 1;
+    options.num_threads = 8;
 
     options.max_num_iterations = 5;
     options.function_tolerance = 1.e-3;
@@ -478,7 +482,10 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
         Profiler::Start("2.BA_Optimize");
 
     ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
+    {
+        PROFILE_SCOPE("ceres_solve_localBA");
+        ceres::Solve(options, &problem, &summary);
+    }
 
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
@@ -617,7 +624,10 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
         if( pslamstate_->debug_ )
             Profiler::Start("2.BA_L2-Refinement");
 
-        ceres::Solve(options, &problem, &summary);
+        {
+            PROFILE_SCOPE("ceres_solve_localBA_l2");
+            ceres::Solve(options, &problem, &summary);
+        }
 
         bl2optimdone = true;
 
@@ -638,7 +648,7 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
     // Remove Bad Observations
     if( bl2optimdone )
     {
-        // std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+        // ProfiledLockGuard lock(pmap_->map_mutex_);
 
         for( auto it = vreprojerr_kfid_lmid.begin() 
             ; it != vreprojerr_kfid_lmid.end(); )
@@ -740,7 +750,7 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
     //      Update State Parameters
     // =================================
 
-    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+    ProfiledLockGuard lock(pmap_->map_mutex_);
 
     for( const auto &badkflmid : vbadstereokflmids ) {
         int kfid = badkflmid.first;
@@ -1296,7 +1306,7 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
         options.use_nonmonotonic_steps = true;
     }
 
-    options.num_threads = 1;
+    options.num_threads = 8;
     options.max_num_iterations = 5;
     options.function_tolerance = 1.e-4;
     
@@ -1309,7 +1319,10 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
         Profiler::Start("2.LC_LooseBA_Optimize");
 
     ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
+    {
+        PROFILE_SCOPE("ceres_solve_looseBA");
+        ceres::Solve(options, &problem, &summary);
+    }
 
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
@@ -1528,9 +1541,9 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_LooseBA_remove-outliers");
 
-    std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
+    ProfiledLockGuard lock2(pmap_->optim_mutex_);
 
-    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+    ProfiledLockGuard lock(pmap_->map_mutex_);
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.LC_LooseBA_Update");
@@ -2056,11 +2069,14 @@ void Optimizer::fullBA(const bool buse_robust_cost)
 
     options.num_threads = 8;
     options.max_num_iterations = 100;
-    
+
     options.minimizer_progress_to_stdout = pslamstate_->debug_;
 
     ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
+    {
+        PROFILE_SCOPE("ceres_solve_globalBA");
+        ceres::Solve(options, &problem, &summary);
+    }
 
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
@@ -2148,7 +2164,10 @@ void Optimizer::fullBA(const bool buse_robust_cost)
             loss_function->Reset(nullptr, ceres::TAKE_OWNERSHIP);
         }
 
-        ceres::Solve(options, &problem, &summary);
+        {
+            PROFILE_SCOPE("ceres_solve_globalBA_l2");
+            ceres::Solve(options, &problem, &summary);
+        }
 
         if( pslamstate_->debug_ )
             std::cout << summary.FullReport() << std::endl;
@@ -2446,14 +2465,17 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
 
     options.max_num_iterations = 10;
     options.function_tolerance = 1.e-4;
-    
+
     options.minimizer_progress_to_stdout = pslamstate_->debug_;
 
-    ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
+    {
+        PROFILE_SCOPE("ceres_solve_posegraph");
+        ceres::Solver::Summary summary;
+        ceres::Solve(options, &problem, &summary);
 
-    if( pslamstate_->debug_ )
-        std::cout << summary.FullReport() << std::endl;
+        if( pslamstate_->debug_ )
+            std::cout << summary.FullReport() << std::endl;
+    }
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_PoseGraph_Optimize");
@@ -2521,7 +2543,7 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
         }
     }
 
-    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+    ProfiledLockGuard lock(pmap_->map_mutex_);
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.LC_PoseGraph_Update");
@@ -2738,29 +2760,32 @@ void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids)
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.LC_StructBA_Optimize");
 
-    ceres::Solver::Options options;
-    options.linear_solver_ordering.reset(ordering);
+    {
+        PROFILE_SCOPE("ceres_solve_structBA");
+        ceres::Solver::Options options;
+        options.linear_solver_ordering.reset(ordering);
 
-    options.linear_solver_type = ceres::DENSE_SCHUR;
-    options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+        options.linear_solver_type = ceres::DENSE_SCHUR;
+        options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
 
-    options.num_threads = 1;
+        options.num_threads = 8;
 
-    options.max_num_iterations = 10;
-    options.function_tolerance = 1.e-3;
-    options.max_solver_time_in_seconds = 0.01;
+        options.max_num_iterations = 10;
+        options.function_tolerance = 1.e-3;
+        options.max_solver_time_in_seconds = 0.01;
 
-    if( !pslamstate_->bforce_realtime_ ) {
-        options.max_solver_time_in_seconds *= 2.;
+        if( !pslamstate_->bforce_realtime_ ) {
+            options.max_solver_time_in_seconds *= 2.;
+        }
+
+        options.minimizer_progress_to_stdout = pslamstate_->debug_;
+
+        ceres::Solver::Summary summary;
+        ceres::Solve(options, &problem, &summary);
+
+        if( pslamstate_->debug_ )
+            std::cout << summary.FullReport() << std::endl;
     }
-    
-    options.minimizer_progress_to_stdout = pslamstate_->debug_;
-
-    ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
-
-    if( pslamstate_->debug_ )
-        std::cout << summary.FullReport() << std::endl;
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_StructBA_Optimize");
@@ -2816,23 +2841,26 @@ bool Optimizer::fullPoseGraph(std::vector<Sophus::SE3d, Eigen::aligned_allocator
     }
 
     if( pslamstate_->debug_ )
-        std::cout << "\n\n - [fullPoseGraph] Going to optimize over " << nbkfs 
+        std::cout << "\n\n - [fullPoseGraph] Going to optimize over " << nbkfs
             << " KFs / " << nbposes << " poses in total!\n\n";
 
-    ceres::Solver::Options options;
-    options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-    options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+    {
+        PROFILE_SCOPE("ceres_solve_full_posegraph");
+        ceres::Solver::Options options;
+        options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+        options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
 
-    options.max_num_iterations = 100;
-    options.function_tolerance = 1.e-6;
-    
-    options.minimizer_progress_to_stdout = pslamstate_->debug_;
+        options.max_num_iterations = 100;
+        options.function_tolerance = 1.e-6;
 
-    ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
+        options.minimizer_progress_to_stdout = pslamstate_->debug_;
 
-    if( pslamstate_->debug_ )
-        std::cout << summary.FullReport() << std::endl;
+        ceres::Solver::Summary summary;
+        ceres::Solve(options, &problem, &summary);
+
+        if( pslamstate_->debug_ )
+            std::cout << summary.FullReport() << std::endl;
+    }
     
     std::ofstream f;
     std::string filename = "ov2slam_full_traj_wlc_opt.txt";

@@ -56,12 +56,12 @@ public:
     }
 
     void subLeftImage(const sensor_msgs::ImageConstPtr &image) {
-        std::lock_guard<std::mutex> lock(img_mutex);
+        ProfiledLockGuard lock(img_mutex);
         img0_buf.push(image);
     }
 
     void subRightImage(const sensor_msgs::ImageConstPtr &image) {
-        std::lock_guard<std::mutex> lock(img_mutex);
+        ProfiledLockGuard lock(img_mutex);
         img1_buf.push(image);
     }
 
@@ -92,7 +92,7 @@ public:
             {
                 cv::Mat image0, image1;
 
-                std::lock_guard<std::mutex> lock(img_mutex);
+                ProfiledLockGuard lock(img_mutex);
 
                 if (!img0_buf.empty() && !img1_buf.empty())
                 {
@@ -127,7 +127,7 @@ public:
             {
                 cv::Mat image0;
 
-                std::lock_guard<std::mutex> lock(img_mutex);
+                ProfiledLockGuard lock(img_mutex);
 
                 if ( !img0_buf.empty() )
                 {

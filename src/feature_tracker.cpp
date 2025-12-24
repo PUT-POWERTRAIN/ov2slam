@@ -30,12 +30,16 @@
 #include <unordered_map>
 #include <opencv2/video/tracking.hpp>
 
+#include "sync_profiler.hpp"
+
 #include "multi_view_geometry.hpp"
 
-void FeatureTracker::fbKltTracking(const std::vector<cv::Mat> &vprevpyr, const std::vector<cv::Mat> &vcurpyr, 
-        int nwinsize, int nbpyrlvl, float ferr, float fmax_fbklt_dist, std::vector<cv::Point2f> &vkps, 
+void FeatureTracker::fbKltTracking(const std::vector<cv::Mat> &vprevpyr, const std::vector<cv::Mat> &vcurpyr,
+        int nwinsize, int nbpyrlvl, float ferr, float fmax_fbklt_dist, std::vector<cv::Point2f> &vkps,
         std::vector<cv::Point2f> &vpriorkps, std::vector<bool> &vkpstatus) const
 {
+    PROFILE_FUNCTION();
+
     // std::cout << "\n \t >>> Forward-Backward kltTracking with Pyr of Images and Motion Prior! \n";
 
     assert(vprevpyr.size() == vcurpyr.size());
@@ -137,10 +141,12 @@ void FeatureTracker::fbKltTracking(const std::vector<cv::Mat> &vprevpyr, const s
 }
 
 
-void FeatureTracker::getLineMinSAD(const cv::Mat &iml, const cv::Mat &imr, 
-    const cv::Point2f &pt,  const int nwinsize, float &xprior, 
+void FeatureTracker::getLineMinSAD(const cv::Mat &iml, const cv::Mat &imr,
+    const cv::Point2f &pt,  const int nwinsize, float &xprior,
     float &l1err, bool bgoleft) const
 {
+    PROFILE_FUNCTION();
+
     xprior = -1;
 
     if( nwinsize % 2 == 0 ) {

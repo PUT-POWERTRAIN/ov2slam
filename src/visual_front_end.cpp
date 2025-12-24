@@ -31,6 +31,8 @@
 
 #include <opencv2/highgui.hpp>
 
+#include "sync_profiler.hpp"
+
 
 VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, 
         std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker)
@@ -39,7 +41,9 @@ VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_p
 
 bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
 {
-    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+    PROFILE_FUNCTION();
+
+    ProfiledLockGuard lock(pmap_->map_mutex_);
     
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("0.Full-Front_End");
@@ -64,6 +68,8 @@ bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
 // Perform tracking in one image, update kps and MP obs, return true if a new KF is req.
 bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ )
         std::cout << "\n\n - [Visual-Front-End]: Track Mono Image\n";
     
@@ -131,6 +137,8 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 // KLT Tracking with motion prior
 void VisualFrontEnd::kltTracking()
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_TM_KLT-Tracking");
 
@@ -277,6 +285,8 @@ void VisualFrontEnd::kltTracking()
 
 void VisualFrontEnd::kltTrackingFromKF()
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_TM_KLT-Tracking-from-KF");
 
@@ -445,6 +455,8 @@ void VisualFrontEnd::kltTrackingFromKF()
 // This function apply a 2d-2d based outliers filtering
 void VisualFrontEnd::epipolar2d2dFiltering()
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_TM_EpipolarFiltering");
     
@@ -658,6 +670,8 @@ void VisualFrontEnd::epipolar2d2dFiltering()
 
 void VisualFrontEnd::computePose()
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_TM_computePose");
 
@@ -1142,6 +1156,8 @@ float VisualFrontEnd::computeParallax(const int kfid, bool do_unrot, bool bmedia
 
 void VisualFrontEnd::preprocessImage(cv::Mat &img_raw)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_TM_preprocessImage");
 

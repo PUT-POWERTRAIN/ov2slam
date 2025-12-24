@@ -28,9 +28,13 @@
 
 #include "estimator.hpp"
 
+#include "sync_profiler.hpp"
+
 
 void Estimator::run()
 {
+    PROFILE_FUNCTION();
+
     std::cout << "\n Estimator is ready to process Keyframes!\n";
     
     while( !bexit_required_ ) {
@@ -58,7 +62,7 @@ void Estimator::run()
 
     poptimizer_->signalStopLocalBA();
     
-    std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
+    ProfiledLockGuard lock2(pmap_->optim_mutex_);
 
     std::cout << "\n Estimator thread is exiting.\n";
 }
@@ -66,6 +70,8 @@ void Estimator::run()
 
 void Estimator::applyLocalBA()
 {
+    PROFILE_FUNCTION();
+
     int nmincstkfs = 1;
     if( pslamstate_->mono_ ) {
         nmincstkfs = 2;
@@ -82,7 +88,7 @@ void Estimator::applyLocalBA()
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.BA_localBA");
 
-    std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
+    ProfiledLockGuard lock2(pmap_->optim_mutex_);
 
     // We signal that Estimator is performing BA
     pslamstate_->blocalba_is_on_ = true;
@@ -136,7 +142,7 @@ void Estimator::mapFiltering()
             continue;
         } 
         else if( (int)pkf->nb3dkps_ < pslamstate_->nmin_covscore_ / 2 ) {
-            std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+            ProfiledLockGuard lock(pmap_->map_mutex_);
             pmap_->removeKeyframe(kfid);
             continue;
         }
@@ -173,7 +179,7 @@ void Estimator::mapFiltering()
             if( pslamstate_->lckfid_ == kfid ) {
                 continue;
             }
-            std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+            ProfiledLockGuard lock(pmap_->map_mutex_);
             pmap_->removeKeyframe(kfid);
         }
     }
@@ -234,7 +240,7 @@ void Estimator::addNewKf(const std::shared_ptr<Frame> &pkf)
 
 void Estimator::reset()
 {
-    std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
+    ProfiledLockGuard lock2(pmap_->optim_mutex_);
 
     bnewkfavailable_ = false;
     bexit_required_ = false; 

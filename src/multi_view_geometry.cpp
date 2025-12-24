@@ -45,6 +45,8 @@
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/calib3d.hpp>
 
+#include "sync_profiler.hpp"
+
 
 // Triangulation methods
 // =====================
@@ -171,6 +173,8 @@ bool MultiViewGeometry::opengvP3PRansac(
     const int nmaxiter, const float errth, const bool boptimize, const bool bdorandom,
     const float fx, const float fy, Sophus::SE3d &Twc, std::vector<int> &voutliersidx)
 {
+    PROFILE_FUNCTION();
+
     assert( bvs.size() == vwpts.size() );
 
     size_t nb3dpts = bvs.size();
@@ -492,11 +496,12 @@ bool MultiViewGeometry::ceresPnP(
 bool MultiViewGeometry::ceresPnP(
     const std::vector<Eigen::Vector2d, Eigen::aligned_allocator<Eigen::Vector2d> > &vunkps,
     const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &vwpts,
-    const std::vector<int> &vscales, Sophus::SE3d &Twc, const int nmaxiter, 
+    const std::vector<int> &vscales, Sophus::SE3d &Twc, const int nmaxiter,
     const float chi2th, const bool buse_robust, const bool bapply_l2_after_robust,
-    const float fx, const float fy, const float cx, const float cy, 
+    const float fx, const float fy, const float cx, const float cy,
     std::vector<int> &voutliersidx)
 {
+    PROFILE_FUNCTION();
     assert( vunkps.size() == vwpts.size() );
 
     ceres::Problem problem;
@@ -611,12 +616,14 @@ bool MultiViewGeometry::compute5ptEssentialMatrix(
 
 #ifdef USE_OPENGV
 bool MultiViewGeometry::opengv5ptEssentialMatrix(
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs1, 
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs2, 
-    const int nmaxiter, const float errth, const bool boptimize, 
-    const bool bdorandom, const float fx, const float fy, Eigen::Matrix3d &Rwc, 
+    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs1,
+    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs2,
+    const int nmaxiter, const float errth, const bool boptimize,
+    const bool bdorandom, const float fx, const float fy, Eigen::Matrix3d &Rwc,
     Eigen::Vector3d &twc, std::vector<int> &voutliersidx)
 {
+    PROFILE_FUNCTION();
+
     assert( bvs1.size() == bvs2.size() );
 
     size_t nbpts = bvs1.size();
@@ -697,11 +704,13 @@ bool MultiViewGeometry::opengv5ptEssentialMatrix(
 #endif 
 
 bool MultiViewGeometry::opencv5ptEssentialMatrix(
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs1, 
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs2, 
+    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs1,
+    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs2,
     const int nmaxiter, const float errth, const bool boptimize, const float fx, const float fy,
     Eigen::Matrix3d &Rwc, Eigen::Vector3d &twc, std::vector<int> &voutliersidx)
 {
+    PROFILE_FUNCTION();
+
     assert( bvs1.size() == bvs2.size() );
 
     size_t nbpts = bvs1.size();

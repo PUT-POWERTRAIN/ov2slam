@@ -29,6 +29,10 @@
 #include <mutex>
 #include <unordered_map>
 
+#ifdef ENABLE_PROFILING
+#include "sync_profiler.hpp"
+#endif
+
 #ifdef STANDALONE
 // Include stub with pcl definitions
 #include "stub_ros_visualizer.hpp"
@@ -51,6 +55,8 @@ public:
     MapManager() {}
 
     MapManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, std::shared_ptr<FeatureExtractor> pfeatextract, std::shared_ptr<FeatureTracker> ptracker);
+
+    ~MapManager();
 
     void prepareFrame();
     
@@ -127,8 +133,17 @@ public:
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcloud_;
 
+#ifdef ENABLE_PROFILING
+    mutable ProfiledMutex kf_mutex_{"kf_mutex_"};
+    mutable ProfiledMutex lm_mutex_{"lm_mutex_"};
+    mutable ProfiledMutex curframe_mutex_{"curframe_mutex_"};
+
+    mutable ProfiledMutex map_mutex_{"map_mutex_"};
+    mutable ProfiledMutex optim_mutex_{"optim_mutex_"};
+#else
     mutable std::mutex kf_mutex_, lm_mutex_;
     mutable std::mutex curframe_mutex_;
 
     mutable std::mutex map_mutex_, optim_mutex_;
+#endif
 };

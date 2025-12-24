@@ -29,6 +29,8 @@
 #include "mapper.hpp"
 #include "opencv2/video/tracking.hpp"
 
+#include "sync_profiler.hpp"
+
 Mapper::Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, 
             std::shared_ptr<Frame> pframe)
     : pslamstate_(pslamstate), pmap_(pmap), pcurframe_(pframe)
@@ -43,6 +45,8 @@ Mapper::Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManage
 
 void Mapper::run()
 {
+    PROFILE_FUNCTION();
+
     std::cout << "\nMapper is ready to process Keyframes!\n";
     
     Keyframe kf;
@@ -92,7 +96,7 @@ void Mapper::run()
                             << " / " << pnewkf->nb_stereo_kps_ << "\n";
                     }
 
-                    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+                    ProfiledLockGuard lock(pmap_->map_mutex_);
 
                     triangulateStereo(*pnewkf);
 
@@ -115,7 +119,7 @@ void Mapper::run()
                         << " / " << pnewkf->nb_stereo_kps_ << "\n";
                 }
 
-                std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+                ProfiledLockGuard lock(pmap_->map_mutex_);
                 
                 triangulateTemporal(*pnewkf);
                 
@@ -190,6 +194,8 @@ void Mapper::run()
 
 void Mapper::triangulateTemporal(Frame &frame)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.KF_TriangulateTemporal");
 
@@ -345,6 +351,8 @@ void Mapper::triangulateTemporal(Frame &frame)
 
 void Mapper::triangulateStereo(Frame &frame)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.KF_TriangulateStereo");
 
@@ -468,6 +476,8 @@ inline Eigen::Vector3d Mapper::computeTriangulation(const Sophus::SE3d &T, const
 
 bool Mapper::matchingToLocalMap(Frame &frame)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.KF_MatchingToLocalMap");
 
@@ -555,9 +565,11 @@ bool Mapper::matchingToLocalMap(Frame &frame)
 
 void Mapper::mergeMatches(const Frame &frame, const std::map<int,int> &map_kpids_lmids)
 {
-    std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
+    PROFILE_FUNCTION();
 
-    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+    ProfiledLockGuard lock2(pmap_->optim_mutex_);
+
+    ProfiledLockGuard lock(pmap_->map_mutex_);
 
     // Merge the matches
     for( const auto &ids : map_kpids_lmids )
@@ -820,7 +832,7 @@ void Mapper::addNewKf(const Keyframe &kf)
 
 void Mapper::reset()
 {
-    std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
+    ProfiledLockGuard lock2(pmap_->optim_mutex_);
 
     bnewkfavailable_ = false;
     bwaiting_for_lc_ = false;

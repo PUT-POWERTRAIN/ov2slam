@@ -29,6 +29,8 @@
 
 #include "ov2slam.hpp"
 
+#include "sync_profiler.hpp"
+
 
 SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<RosVisualizer> pviz)
     : pslamstate_(pstate)
@@ -115,6 +117,8 @@ SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Ros
 
 void SlamManager::run()
 {
+    PROFILE_FUNCTION();
+
     std::cout << "\nOV²SLAM is ready to process incoming images!\n";
 
     bis_on_ = true;
@@ -225,8 +229,8 @@ void SlamManager::run()
                 ros::requestShutdown();
             }
             else {
-                std::chrono::milliseconds dura(1);
-                std::this_thread::sleep_for(dura);
+                // Removed sleep - use yield instead to avoid busy-waiting
+                std::this_thread::yield();
             }
         }
     }
@@ -597,7 +601,7 @@ void SlamManager::writeResults()
     // Apply full BA on KFs + 3D MPs if required + save
     if( pslamstate_->do_full_ba_ ) 
     {
-        std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+        ProfiledLockGuard lock(pmap_->map_mutex_);
         pmapper_->runFullBA();
 
         prosviz_->pubPointCloud(pmap_->pcloud_, ros::Time::now().toSec());

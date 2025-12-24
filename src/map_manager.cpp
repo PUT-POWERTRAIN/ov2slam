@@ -34,19 +34,44 @@
 
 #include "map_manager.hpp"
 
+#include "sync_profiler.hpp"
+
 MapManager::MapManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, std::shared_ptr<FeatureExtractor> pfeatextract, std::shared_ptr<FeatureTracker> ptracker)
     : nlmid_(0), nkfid_(0), nblms_(0), nbkfs_(0), pslamstate_(pstate), pfeatextract_(pfeatextract), ptracker_(ptracker), pcurframe_(pframe)
 {
     pcloud_.reset( new pcl::PointCloud<pcl::PointXYZRGB>() );
     pcloud_->points.reserve(1e5);
+
+#ifdef ENABLE_PROFILING
+    // Register mutexes with the profiler
+    SyncProfiler::getInstance().registerMutex("kf_mutex_", &kf_mutex_);
+    SyncProfiler::getInstance().registerMutex("lm_mutex_", &lm_mutex_);
+    SyncProfiler::getInstance().registerMutex("curframe_mutex_", &curframe_mutex_);
+    SyncProfiler::getInstance().registerMutex("map_mutex_", &map_mutex_);
+    SyncProfiler::getInstance().registerMutex("optim_mutex_", &optim_mutex_);
+#endif
 }
 
+MapManager::~MapManager()
+{
+#ifdef ENABLE_PROFILING
+    // Unregister mutexes before they are destroyed
+    // (prevents dangling pointer bug in SyncProfiler)
+    SyncProfiler::getInstance().unregisterMutex("optim_mutex_");
+    SyncProfiler::getInstance().unregisterMutex("map_mutex_");
+    SyncProfiler::getInstance().unregisterMutex("curframe_mutex_");
+    SyncProfiler::getInstance().unregisterMutex("lm_mutex_");
+    SyncProfiler::getInstance().unregisterMutex("kf_mutex_");
+#endif
+}
 
 // This function turn the current frame into a Keyframe.
 // Keypoints extraction is performed and the related MPs and
 // the new KF are added to the map.
 void MapManager::createKeyframe(const cv::Mat &im, const cv::Mat &imraw)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.FE_createKeyframe");
 
@@ -68,6 +93,8 @@ void MapManager::createKeyframe(const cv::Mat &im, const cv::Mat &imraw)
 // (Update observations between MPs / KFs)
 void MapManager::prepareFrame()
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_CF_prepareFrame");
 
@@ -198,7 +225,7 @@ void MapManager::updateFrameCovisibility(Frame &frame)
 
 void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Point2f> &vpts, Frame &frame)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
     
     // Add keypoints + create MPs
     size_t nbpts = vpts.size();
@@ -215,7 +242,7 @@ void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Po
 void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Point2f> &vpts, 
     const std::vector<int> &vscales, Frame &frame)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
     
     // Add keypoints + create landmarks
     size_t nbpts = vpts.size();
@@ -232,7 +259,7 @@ void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Po
 
 void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Point2f> &vpts, const std::vector<cv::Mat> &vdescs, Frame &frame)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
     
     // Add keypoints + create landmarks
     size_t nbpts = vpts.size();
@@ -261,7 +288,7 @@ void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Po
 void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Point2f> &vpts, const std::vector<int> &vscales, const std::vector<float> &vangles, 
                         const std::vector<cv::Mat> &vdescs, Frame &frame)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
     
     // Add keypoints + create landmarks
     size_t nbpts = vpts.size();
@@ -289,6 +316,8 @@ void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Po
 // Extract new kps into provided image and update cur. Frame
 void MapManager::extractKeypoints(const cv::Mat &im, const cv::Mat &imraw)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_CF_extractKeypoints");
 
@@ -348,6 +377,8 @@ void MapManager::extractKeypoints(const cv::Mat &im, const cv::Mat &imraw)
 // Describe cur frame kps in cur image
 void MapManager::describeKeypoints(const cv::Mat &im, const std::vector<Keypoint> &vkps, const std::vector<cv::Point2f> &vpts, const std::vector<int> *pvscales, std::vector<float> *pvangles)
 {
+    PROFILE_FUNCTION();
+
     size_t nbkps = vkps.size();
     std::vector<cv::Mat> vdescs;
 
@@ -368,8 +399,10 @@ void MapManager::describeKeypoints(const cv::Mat &im, const std::vector<Keypoint
 
 // This function is responsible for performing stereo matching operations
 // for the means of triangulation
-void MapManager::stereoMatching(Frame &frame, const std::vector<cv::Mat> &vleftpyr, const std::vector<cv::Mat> &vrightpyr) 
+void MapManager::stereoMatching(Frame &frame, const std::vector<cv::Mat> &vleftpyr, const std::vector<cv::Mat> &vrightpyr)
 {
+    PROFILE_FUNCTION();
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.KF_stereoMatching");
 
@@ -628,7 +661,7 @@ void MapManager::addKeyframe()
     // independant KF to add to the map
     std::shared_ptr<Frame> pkf = std::allocate_shared<Frame>(Eigen::aligned_allocator<Frame>(), *pcurframe_);
 
-    std::lock_guard<std::mutex> lock(kf_mutex_);
+    ProfiledLockGuard lock(kf_mutex_);
 
     // Add KF to the unordered map and update id/nb
     map_pkfs_.emplace(nkfid_, pkf);
@@ -694,7 +727,7 @@ void MapManager::addMapPoint(const cv::Mat &desc, const cv::Scalar &color)
 // Returns a shared_ptr of the req. KF
 std::shared_ptr<Frame> MapManager::getKeyframe(const int kfid) const
 {
-    std::lock_guard<std::mutex> lock(kf_mutex_);
+    ProfiledLockGuard lock(kf_mutex_);
 
     auto it = map_pkfs_.find(kfid);
     if( it == map_pkfs_.end() ) {
@@ -706,7 +739,7 @@ std::shared_ptr<Frame> MapManager::getKeyframe(const int kfid) const
 // Returns a shared_ptr of the req. MP
 std::shared_ptr<MapPoint> MapManager::getMapPoint(const int lmid) const
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
 
     auto it = map_plms_.find(lmid);
     if( it == map_plms_.end() ) {
@@ -718,8 +751,8 @@ std::shared_ptr<MapPoint> MapManager::getMapPoint(const int lmid) const
 // Update a MP world pos.
 void MapManager::updateMapPoint(const int lmid, const Eigen::Vector3d &wpt, const double kfanch_invdepth)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     auto plmit = map_plms_.find(lmid);
 
@@ -772,8 +805,8 @@ void MapManager::updateMapPoint(const int lmid, const Eigen::Vector3d &wpt, cons
 // Add a new KF obs to provided MP (lmid)
 void MapManager::addMapPointKfObs(const int lmid, const int kfid)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     auto pkfit = map_pkfs_.find(kfid);
     auto plmit = map_plms_.find(lmid);
@@ -808,8 +841,8 @@ void MapManager::mergeMapPoints(const int prevlmid, const int newlmid)
     // 2. Remove prev MP
     // 3. Update new MP and related KF / cur Frame
 
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     // Get prev MP to merge into new MP
 
@@ -888,8 +921,8 @@ void MapManager::mergeMapPoints(const int prevlmid, const int newlmid)
 // Remove a KF from the map
 void MapManager::removeKeyframe(const int kfid)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     // Get KF to remove
     auto pkfit = map_pkfs_.find(kfid);
@@ -925,8 +958,8 @@ void MapManager::removeKeyframe(const int kfid)
 // Remove a MP from the map
 void MapManager::removeMapPoint(const int lmid)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     // Get related MP
     auto plmit = map_plms_.find(lmid);
@@ -973,8 +1006,8 @@ void MapManager::removeMapPoint(const int lmid)
 // Remove a KF obs from a MP
 void MapManager::removeMapPointObs(const int lmid, const int kfid)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     // Remove MP obs from KF
     auto pkfit = map_pkfs_.find(kfid);
@@ -1004,8 +1037,8 @@ void MapManager::removeMapPointObs(const int lmid, const int kfid)
 
 void MapManager::removeMapPointObs(MapPoint &lm, Frame &frame)
 {
-    std::lock_guard<std::mutex> lock(lm_mutex_);
-    std::lock_guard<std::mutex> lockkf(kf_mutex_);
+    ProfiledLockGuard lock(lm_mutex_);
+    ProfiledLockGuard lockkf(kf_mutex_);
 
     frame.removeKeypointById(lm.lmid_);
     lm.removeKfObs(frame.kfid_);

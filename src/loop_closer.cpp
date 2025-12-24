@@ -33,6 +33,8 @@
 
 #include <opencv2/features2d.hpp>
 
+#include "sync_profiler.hpp"
+
 #ifdef OPENCV_CONTRIB
   #include <opencv2/xfeatures2d.hpp>
   cv::Ptr<cv::xfeatures2d::BriefDescriptorExtractor> pbriefd_  = cv::xfeatures2d::BriefDescriptorExtractor::create();
@@ -118,7 +120,7 @@ void LoopCloser::run()
             // in different threads which might slow down the front-end
             // (due to the fact that detection is already performed in parallel)
             {
-            std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+            ProfiledLockGuard lock(pmap_->map_mutex_);
             }
             pfastd_->detect(newkfimg_, vaddkps, mask);
 
@@ -313,7 +315,7 @@ void LoopCloser::processLoopCandidate(int kfloopidx)
 
         int inikfid = plckf->getCovisibleKfMap().begin()->first;
 
-        std::unique_lock<std::mutex> lock2(pmap_->optim_mutex_);
+        ProfiledUniqueLock lock2(pmap_->optim_mutex_);
 
         double lc_pose_err = (pnewkf_->getTcw() * Twc).log().norm();
 
@@ -331,7 +333,7 @@ void LoopCloser::processLoopCandidate(int kfloopidx)
             vmergedlmids.reserve(vkplmids.size());
 
             // Lock the map before merging
-            std::unique_lock<std::mutex> lock(pmap_->map_mutex_);
+            std::unique_lock<ProfiledMutex> lock(pmap_->map_mutex_);
 
             for( const auto &kplmid : vkplmids )
             {

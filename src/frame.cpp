@@ -26,6 +26,8 @@
 
 #include "frame.hpp"
 
+#include "sync_profiler.hpp"
+
 Frame::Frame()
     : id_(-1), kfid_(0), img_time_(0.), nbkps_(0), nb2dkps_(0), nb3dkps_(0), nb_stereo_kps_(0),
       Frl_(Eigen::Matrix3d::Zero()), Fcv_(cv::Mat::zeros(3,3,CV_64F))
@@ -37,6 +39,8 @@ Frame::Frame(std::shared_ptr<CameraCalibration> pcalib_left, const size_t ncells
       nb2dkps_(0), nb3dkps_(0), nb_stereo_kps_(0),
       pcalib_leftcam_(pcalib_left)
 {
+    PROFILE_FUNCTION();
+
     // Init grid from images size
     nbwcells_ = static_cast<size_t>(ceilf( static_cast<float>(pcalib_leftcam_->img_w_) / ncellsize_ ));
     nbhcells_ = static_cast<size_t>(ceilf( static_cast<float>(pcalib_leftcam_->img_h_) / ncellsize_ ));
@@ -51,6 +55,8 @@ Frame::Frame(std::shared_ptr<CameraCalibration> pcalib_left, std::shared_ptr<Cam
     : id_(-1), kfid_(0), img_time_(0.), ncellsize_(ncellsize), nbkps_(0), nb2dkps_(0), nb3dkps_(0), nb_stereo_kps_(0),
     pcalib_leftcam_(pcalib_left), pcalib_rightcam_(pcalib_right)
 {
+    PROFILE_FUNCTION();
+
     Eigen::Vector3d t = pcalib_rightcam_->Tcic0_.translation();
     Eigen::Matrix3d tskew;
     tskew << 0., -t(2), t(1),
