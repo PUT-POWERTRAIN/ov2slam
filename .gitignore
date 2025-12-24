@@ -1,0 +1,29 @@
+# Build outputs
+build_standalone/
+Thirdparty/*/build/
+Thirdparty/*/install/
+
+# Test executables
+test_io_only
+test_png_readers
+test_parallel_png
+test_disk_benchmark
+test_pgm_vs_png
+convert_pgm_test
+
+# SLAM output files
+*.txt
+!README.md
+!CMakeLists.txt
+
+# Logs
+*.log
+
+# Backups
+*.bak
+
+# Profiling temp files
+/tmp/*.log
+
+# Old async loader (superseded by parallel version)
+include/async_image_loader.hpp
