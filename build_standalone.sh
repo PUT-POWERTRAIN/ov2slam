@@ -21,9 +21,9 @@ rm -rf $BUILD_DIR
 mkdir -p $BUILD_DIR
 cd $BUILD_DIR
 
-# Configure with CMake (without ROS)
+# Configure with CMake (without ROS, with profiling enabled)
 echo "Configuring CMake..."
-cmake ..
+cmake -DENABLE_PROFILING=ON ..
 
 # Build
 echo "Building OV2SLAM standalone..."
