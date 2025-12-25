@@ -79,19 +79,20 @@ bool GTLoader::loadFromAHRS(const std::string& ahrs_file) {
         if (line.empty() || line[0] == '#') continue;
 
         std::istringstream iss(line);
-        double timestamp, roll, pitch, yaw;
-        double qw, qx, qy, qz, ax, ay, az;
+        double timestamp, qx, qy, qz, qw;
+        double wx, wy, wz, ax, ay, az;
 
-        // Format: timestamp roll pitch yaw qw qx qy qz ax ay az
-        // where roll,pitch,yaw are orientation angles in radians
-        iss >> timestamp >> roll >> pitch >> yaw >> qw >> qx >> qy >> qz >> ax >> ay >> az;
+        // Format: timestamp qx qy qz qw wx wy wz ax ay az
+        // where qx,qy,qz,qw is orientation quaternion (scalar last: qw is scalar)
+        // wx,wy,wz is angular rate in rad/s
+        // ax,ay,az is linear acceleration in m/s^2
+        iss >> timestamp >> qx >> qy >> qz >> qw >> wx >> wy >> wz >> ax >> ay >> az;
 
-        // Convert Euler angles (roll, pitch, yaw in radians) to quaternion
-        // ZYX order: yaw (Z), pitch (Y), roll (X)
-        Eigen::Quaterniond q =
-            Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-            Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
-            Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+        // Create quaternion from file (Eigen uses scalar-first: qw, qx, qy, qz)
+        Eigen::Quaterniond q(qw, qx, qy, qz);
+
+        // Normalize quaternion (AHRS data should already be normalized, but ensure it)
+        q.normalize();
 
         // Store AHRS pose independently for AHRS-only mode
         AHRSPose ahrs_pose;
