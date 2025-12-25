@@ -91,6 +91,28 @@ bool GTLoader::loadFromAHRS(const std::string& ahrs_file) {
         // Create quaternion from file (Eigen uses scalar-first: qw, qx, qy, qz)
         Eigen::Quaterniond q(qw, qx, qy, qz);
 
+        // SANITY CHECK: Validate quaternion on first line
+        if( line_num == 1 ) {
+            double norm = q.norm();
+            if( std::abs(norm - 1.0) > 0.2 ) {
+                std::cerr << "[GTLoader] ERROR: Quaternion not normalized! norm=" << norm << std::endl;
+                std::cerr << "[GTLoader] Are you reading correct columns?" << std::endl;
+                std::cerr << "[GTLoader] Expected format: timestamp qx qy qz qw wx wy wz ax ay az" << std::endl;
+                std::cerr << "[GTLoader] Quaternion components should have norm ~1.0" << std::endl;
+                std::cerr << "[GTLoader] If norm >> 1.0, you might be reading angular rates instead!" << std::endl;
+                return false;
+            }
+
+            // SANITY CHECK: Acceleration Z should be ~ -9.8 (gravity)
+            if( std::abs(az + 9.8) > 5.0 ) {
+                std::cerr << "[GTLoader] WARNING: Acceleration Z looks wrong! az=" << az << " m/s²" << std::endl;
+                std::cerr << "[GTLoader] Expected ~ -9.8 m/s² (gravity pointing down)" << std::endl;
+                std::cerr << "[GTLoader] Check if column mapping is correct" << std::endl;
+            }
+
+            std::cout << "[GTLoader] AHRS format validation passed (qnorm=" << norm << ", az=" << az << ")" << std::endl;
+        }
+
         // Normalize quaternion (AHRS data should already be normalized, but ensure it)
         q.normalize();
 
