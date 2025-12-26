@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(ov2slam_standalone)
+project(ov2slam)
 
 if(POLICY CMP0022)
   cmake_policy(SET CMP0022 NEW)
@@ -23,14 +23,36 @@ if(WITH_OPENCV_CONTRIB)
     add_definitions(-DOPENCV_CONTRIB)
 endif()
 
-# Standalone mode (no ROS)
-add_definitions(-DSTANDALONE)
+# OV2SLAM - No ROS dependencies
 
 # Profiling support
 option(ENABLE_PROFILING "Enable synchronization profiling" OFF)
 if(ENABLE_PROFILING)
     add_definitions(-DENABLE_PROFILING)
     message(STATUS "Profiling enabled")
+endif()
+
+# Rerun visualization support
+option(ENABLE_RERUN "Enable Rerun visualization" OFF)
+if(ENABLE_RERUN)
+  message(STATUS "Rerun visualization enabled - fetching SDK via FetchContent...")
+
+  include(FetchContent)
+
+  # Download and configure Rerun C++ SDK
+  FetchContent_Declare(
+    rerun_sdk
+    URL https://github.com/rerun-io/rerun/releases/latest/download/rerun_cpp_sdk.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP true
+  )
+
+  # This will download prebuilt libraries, C++ sources, headers, and CMake config
+  # We need to override the project() call in Rerun's CMakeLists to avoid recursive CXX enable
+  set(CMAKE_PROJECT_rerun_sdk_INCLUDE)
+  FetchContent_MakeAvailable(rerun_sdk)
+
+  add_definitions(-DENABLE_RERUN)
+  message(STATUS "Rerun SDK: ${rerun_sdk_SOURCE_DIR}")
 endif()
 
 # OpenCV 2.x to 4.x compatibility
@@ -86,6 +108,53 @@ if (Sophus_FOUND)
   message(STATUS "Found Sophus lib: ${Sophus_VERSION} - ${Sophus_DIR}")
 endif()
 
+# Find GeographicLib (try both GeographicLib and geographiclib)
+find_package(GeographicLib QUIET)
+if(NOT GeographicLib_FOUND)
+  find_package(geographiclib QUIET)
+  if(geographiclib_FOUND)
+    set(GeographicLib_FOUND TRUE)
+    # Create alias for compatibility
+    if(NOT TARGET GeographicLib::GeographicLib AND TARGET geographiclib::geographiclib)
+      add_library(GeographicLib::GeographicLib ALIAS geographiclib::geographiclib)
+    endif()
+  endif()
+endif()
+
+# Manual search for Debian/Ubuntu systems
+if(NOT GeographicLib_FOUND)
+  find_path(GeographicLib_INCLUDE_DIRS
+    NAMES GeographicLib/Config.h
+    PATHS /usr/include /usr/local/include
+  )
+  find_library(GeographicLib_LIBRARIES
+    NAMES GeographicLib
+    PATHS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib
+  )
+  if(GeographicLib_INCLUDE_DIRS AND GeographicLib_LIBRARIES)
+    set(GeographicLib_FOUND TRUE)
+    # Create imported target
+    if(NOT TARGET GeographicLib::GeographicLib)
+      add_library(GeographicLib::GeographicLib UNKNOWN IMPORTED)
+      set_target_properties(GeographicLib::GeographicLib PROPERTIES
+        IMPORTED_LOCATION "${GeographicLib_LIBRARIES}"
+        INTERFACE_INCLUDE_DIRECTORIES "${GeographicLib_INCLUDE_DIRS}"
+      )
+    endif()
+  endif()
+endif()
+
+if(GeographicLib_FOUND)
+  message(STATUS "Found GeographicLib: ${GeographicLib_VERSION}")
+  add_definitions(-DENABLE_GPS_INIT)
+else()
+  message(WARNING "GeographicLib not found - GPS initialization disabled")
+endif()
+
+# AHRS initialization (always available if GTLoader is built)
+add_definitions(-DENABLE_AHRS_INIT)
+message(STATUS "AHRS initialization enabled")
+
 # Add backward
 add_subdirectory(Thirdparty/backward-cpp)
 
@@ -106,6 +175,9 @@ add_library(${PROJECT_NAME}_lib
   src/optimizer.cpp
   src/estimator.cpp
   src/loop_closer.cpp
+  src/gt_loader.cpp
+  src/gps_converter.cpp
+  src/trajectory_evaluator.cpp
 )
 
 target_include_directories(${PROJECT_NAME}_lib
@@ -147,8 +219,27 @@ if (opengv_FOUND)
   )
 endif()
 
-# Build standalone executable
-add_executable(${PROJECT_NAME} src/main_standalone.cpp ${BACKWARD_ENABLE})
+if(GeographicLib_FOUND)
+  target_link_libraries(${PROJECT_NAME}_lib PUBLIC GeographicLib::GeographicLib)
+endif()
+
+# Rerun visualization
+if(ENABLE_RERUN)
+  target_sources(${PROJECT_NAME}_lib PRIVATE
+    src/rerun_visualizer.cpp
+  )
+  target_link_libraries(${PROJECT_NAME}_lib PRIVATE rerun_sdk)
+endif()
+
+# Build executable
+add_executable(${PROJECT_NAME} src/main.cpp ${BACKWARD_ENABLE})
+
+# Add Rerun definitions to executable too
+if(ENABLE_RERUN)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_RERUN)
+  target_link_libraries(${PROJECT_NAME} PRIVATE rerun_sdk)
+endif()
+
 add_backward(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME}
@@ -163,10 +254,50 @@ target_link_libraries(
       ${PROJECT_NAME}_lib
 )
 
-message(STATUS "Building OV2SLAM Standalone (No ROS)")
+message(STATUS "Building OV2SLAM")
 message(STATUS "OpenCV: ${OpenCV_VERSION}")
 message(STATUS "Eigen3: ${Eigen3_VERSION}")
 message(STATUS "Sophus: ${Sophus_VERSION}")
 message(STATUS "Ceres: ${CERES_VERSION}")
 message(STATUS "iBoW-LCD: ${WITH_IBOW_LCD}")
 message(STATUS "OpenGV: ${opengv_FOUND}")
+
+# Testing support
+option(ENABLE_TESTS "Build unit tests" OFF)
+if(ENABLE_TESTS)
+    enable_testing()
+
+    # Download GoogleTest
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+
+    # Test executable
+    add_executable(gps_tests
+        test/test_gps_converter.cpp
+        test/test_direction.cpp
+    )
+
+    target_include_directories(gps_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/include
+            ${Eigen3_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(gps_tests
+        PRIVATE
+            ${PROJECT_NAME}_lib
+            gtest
+            gtest_main
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(gps_tests)
+
+    message(STATUS "Tests enabled")
+endif()

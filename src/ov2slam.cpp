@@ -28,8 +28,9 @@
 #include <opencv2/highgui.hpp>
 
 #include "ov2slam.hpp"
-
+#include "rerun_visualizer.hpp"
 #include "sync_profiler.hpp"
+#include "gps_converter.hpp"
 
 
 SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<RosVisualizer> pviz)
@@ -117,8 +118,6 @@ SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Ros
 
 void SlamManager::run()
 {
-    PROFILE_FUNCTION();
-
     std::cout << "\nOV²SLAM is ready to process incoming images!\n";
 
     bis_on_ = true;
@@ -139,6 +138,68 @@ void SlamManager::run()
             // Update current frame
             frame_id_++;
             pcurframe_->updateFrame(frame_id_, time);
+
+#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+            // AHRS-only initialization (no GeographicLib required)
+            // Only init if not already initialized (prevents re-init after reset)
+            if( frame_id_ == 0 && pslamstate_->use_ahrs_init_ && !pslamstate_->use_gps_init_ && !bahrs_has_been_inited_ )
+            {
+                if( !gt_loader_ ) {
+                    std::cerr << "\n[FATAL] AHRS init enabled but GTLoader not set!\n";
+                    std::abort();
+                }
+                Eigen::Quaterniond ahrs_orientation;
+                if( !gt_loader_->getOrientationOnlyAt(time, ahrs_orientation) ) {
+                    std::cerr << "\n[FATAL] No AHRS data for timestamp " << time << "\n";
+                    std::abort();
+                }
+                // Transform AHRS body frame orientation to camera frame
+                // Twc = Twb * Tbc  (BODY→WORLD * CAMERA→BODY = CAMERA→WORLD)
+                Sophus::SE3d Twb_init(ahrs_orientation, Eigen::Vector3d::Zero());
+                Sophus::SE3d Twc_init = Twb_init * pslamstate_->T_body_cam0_;
+                pcurframe_->setTwc(Twc_init);
+                bahrs_init_done_ = true;
+                bahrs_has_been_inited_ = true;  // Prevent re-init after reset
+                std::cout << "\n[AHRS Init] Frame 0: pos=(0,0,0), yaw="
+                          << (ahrs_orientation.toRotationMatrix().eulerAngles(2,1,0)[0] * 180.0 / M_PI) << " deg\n";
+            }
+#endif
+
+#ifdef ENABLE_GPS_INIT
+            // GPS+AHRS initialization for first frame (id=0)
+            // Only init if not already initialized (prevents re-init after reset)
+            if( frame_id_ == 0 && pslamstate_->use_gps_init_ && !bgps_has_been_inited_ )
+            {
+                if( !gt_loader_ ) {
+                    std::cerr << "\n[FATAL] GPS init enabled but GTLoader not set! "
+                             << "Did you forget to call slam.setGTLoader()?\n";
+                    std::abort();  // Crash immediately
+                }
+
+                Eigen::Vector3d gps_position;
+                Eigen::Quaterniond ahrs_orientation;
+
+                if( !gt_loader_->getPoseAt(time, gps_position, ahrs_orientation) ) {
+                    std::cerr << "\n[FATAL] No GPS/AHRS data for timestamp " << time
+                             << " in frame 0. Cannot initialize.\n";
+                    std::abort();  // Crash immediately
+                }
+
+                // Get ENU coordinates (GTLoader already converts to local frame)
+                Eigen::Vector3d enu_position = gps_position;
+
+                // Transform GPS position + AHRS orientation to camera frame
+                // Twc = Twb * Tbc  (BODY→WORLD * CAMERA→BODY = CAMERA→WORLD)
+                Sophus::SE3d Twb_init(ahrs_orientation, enu_position);
+                Sophus::SE3d Twc_init = Twb_init * pslamstate_->T_body_cam0_;
+                pcurframe_->setTwc(Twc_init);
+                bgps_init_done_ = true;
+                bgps_has_been_inited_ = true;  // Prevent re-init after reset
+
+                std::cout << "\n[GPS Init] Frame 0: pos=" << enu_position.transpose()
+                         << " yaw=" << (ahrs_orientation.toRotationMatrix().eulerAngles(2,1,0)[0] * 180.0 / M_PI) << " deg\n";
+            }
+#endif
 
             // Update cam delay for automatic exit
             if( frame_id_ > 0 ) {
@@ -161,6 +222,13 @@ void SlamManager::run()
 
             // Save current pose
             Logger::addSE3Pose(time, pcurframe_->getTwc(), is_kf_req);
+
+#ifdef ENABLE_RERUN
+            if(prviz_) {
+                prviz_->logPose(pcurframe_->getTwc(), time);
+                prviz_->logMapPoints(pmap_->map_plms_, time);
+            }
+#endif
 
             if( pslamstate_->breset_req_ ) {
                 reset();
@@ -229,8 +297,8 @@ void SlamManager::run()
                 ros::requestShutdown();
             }
             else {
-                // Removed sleep - use yield instead to avoid busy-waiting
-                std::this_thread::yield();
+                std::chrono::milliseconds dura(1);
+                std::this_thread::sleep_for(dura);
             }
         }
     }
@@ -550,6 +618,14 @@ void SlamManager::visualizeFullKFsTraj(const double time)
         auto pkf = pmap_->getKeyframe(i);
         if( pkf != nullptr ) {
             prosviz_->addKFsTraj(pkf->getTwc());
+
+#ifdef ENABLE_RERUN
+            if(prviz_) {
+                // Log keyframe position (Frame doesn't store image, only pose)
+                cv::Mat empty_img;
+                prviz_->logKeyframe(pkf->getTwc(), empty_img, pkf->kfid_, pkf->img_time_);
+            }
+#endif
         }
     }
     prosviz_->pubKFsTraj(time);
@@ -601,7 +677,7 @@ void SlamManager::writeResults()
     // Apply full BA on KFs + 3D MPs if required + save
     if( pslamstate_->do_full_ba_ ) 
     {
-        ProfiledLockGuard lock(pmap_->map_mutex_);
+        std::lock_guard<ProfiledMutex> lock(pmap_->map_mutex_);
         pmapper_->runFullBA();
 
         prosviz_->pubPointCloud(pmap_->pcloud_, ros::Time::now().toSec());
@@ -699,7 +775,17 @@ void SlamManager::writeFullTrajectoryLC()
     f.close();
 
     std::cout << "\nFull Trajectory w. LC file written!\n";
-    
+
     // Apply full pose graph for optimal full trajectory w. LC
     pmapper_->pestimator_->poptimizer_->fullPoseGraph(vTwc, vTpc, viskf);
 }
+
+#ifdef ENABLE_RERUN
+// setRerunVisualizer is defined inline in ov2slam.hpp
+
+void SlamManager::setMapLogFrequency(int freq) {
+    if(prviz_) {
+        prviz_->setMapLogFrequency(freq);
+    }
+}
+#endif

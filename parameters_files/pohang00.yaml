@@ -155,3 +155,15 @@ fkf_filtering_ratio: 0.9
 
 # Final Pass
 do_full_ba: 0
+
+# Rerun visualization parameters
+rerun_map_log_frequency: 10  # Log map points every N frames (0 = disable)
+rerun_output_file: "ov2slam.rrd"  # Empty = live viewer, or specify path like "ov2slam.rrd" for file recording
+
+#--------------------------------------------------------------------------------------------
+# GPS and AHRS Initialization
+#--------------------------------------------------------------------------------------------
+GPSInit.use_gps_init: 1
+GPSInit.use_ahrs_init: 1
+GPSInit.gps_file: "navigation/gps.txt"
+GPSInit.ahrs_file: "navigation/ahrs.txt"

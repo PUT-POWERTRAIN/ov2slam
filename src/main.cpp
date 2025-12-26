@@ -1,14 +1,10 @@
 /**
-* Standalone OV2SLAM - No ROS required
+* OV2SLAM - Visual SLAM System
 * Reads stereo images from disk and runs SLAM
 *
 * BUILD INSTRUCTIONS:
-* 1. Backup the original ros_visualizer.hpp:
-*    mv include/ros_visualizer.hpp include/ros_visualizer.hpp.bak
-* 2. Use the stub version:
-*    cp include/stub_ros_visualizer.hpp include/ros_visualizer.hpp
-* 3. Build with: ./build_standalone.sh
-* 4. Run: ./build/ov2slam_standalone parameters_files/pohang00.yaml ~/datasets/pohang00
+* 1. Build with: ./build.sh
+* 2. Run: ./build/ov2slam parameters_files/pohang00.yaml ~/datasets/pohang00
 */
 
 #include <iostream>
@@ -20,12 +16,8 @@
 
 #include "ov2slam.hpp"
 #include "slam_params.hpp"
-
-#ifdef ENABLE_PROFILING
-#include "sync_profiler.hpp"
-#endif
-
-#include "async_image_loader_parallel.hpp"
+#include "rerun_visualizer.hpp"
+#include "gt_loader.hpp"
 
 // Use stub ros_visualizer instead of real ROS
 #define USE_STUB_VISUALIZER
@@ -60,12 +52,10 @@ std::vector<std::pair<double, std::string>> readTimestamps(const std::string& fi
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cout << "\n===== OV2SLAM Standalone =====\n";
-        std::cout << "Usage: " << argv[0] << " <parameters_file.yaml> <dataset_path> [max_images]\n";
+        std::cout << "\n===== OV2SLAM =====\n";
+        std::cout << "Usage: " << argv[0] << " <parameters_file.yaml> <dataset_path>\n";
         std::cout << "\nExample:\n";
-        std::cout << "  " << argv[0] << " parameters_files/pohang00.yaml ~/datasets/pohang00 200\n";
-        std::cout << "\nOptions:\n";
-        std::cout << "  max_images  - Limit number of images to process (default: all)\n";
+        std::cout << "  " << argv[0] << " parameters_files/pohang00.yaml ~/datasets/pohang00\n";
         std::cout << "\nOutput files:\n";
         std::cout << "  - ov2slam_trajectory.txt (VO trajectory)\n";
         std::cout << "  - ov2slam_keyframes.txt (keyframe poses)\n";
@@ -76,15 +66,8 @@ int main(int argc, char** argv) {
     std::string parameters_file = argv[1];
     std::string dataset_path = argv[2];
 
-    // Optional limit on number of images
-    size_t max_images = SIZE_MAX;
-    if (argc >= 4) {
-        max_images = std::stoul(argv[3]);
-        std::cout << "Limiting to first " << max_images << " images\n";
-    }
-
     std::cout << "\n========================================\n";
-    std::cout << "     OV2SLAM Standalone Mode\n";
+    std::cout << "     OV2SLAM\n";
     std::cout << "========================================\n";
     std::cout << "Parameters: " << parameters_file << "\n";
     std::cout << "Dataset:    " << dataset_path << "\n\n";
@@ -106,9 +89,54 @@ int main(int argc, char** argv) {
     std::shared_ptr<RosVisualizer> prosviz;
     prosviz.reset(new RosVisualizer(nh));
 
+#ifdef ENABLE_RERUN
+    std::shared_ptr<RerunVisualizer> prviz;
+    prviz.reset(new RerunVisualizer(pparams->rerun_output_file_));
+#endif
+
+    // Load Ground Truth if available
+    std::shared_ptr<GTLoader> gt_loader;
+    std::string gps_file = dataset_path + "/navigation/gps.txt";
+    std::string ahrs_file = dataset_path + "/navigation/ahrs.txt";
+
+    gt_loader.reset(new GTLoader());
+    if(gt_loader->loadFromGPS(gps_file)) {
+        gt_loader->loadFromAHRS(ahrs_file);  // Merge orientation data
+        std::cout << "[GT] Ground truth loaded successfully" << std::endl;
+
+#ifdef ENABLE_RERUN
+        if(prviz) {
+            prviz->setGTLoader(gt_loader);
+            prviz->logGTTrajectory();  // Log GT trajectory to Rerun
+        }
+#endif
+    } else {
+        std::cout << "[GT] No ground truth available, skipping GT visualization" << std::endl;
+    }
+
     // Setup SLAM Manager
     std::cout << "Initializing SLAM system..." << std::endl;
     SlamManager slam(pparams, prosviz);
+
+#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+    if(gt_loader && (pparams->use_gps_init_ || pparams->use_ahrs_init_)) {
+        slam.setGTLoader(gt_loader);
+        if(pparams->use_gps_init_)
+            std::cout << "GPS+AHRS initialization enabled" << std::endl;
+        else
+            std::cout << "AHRS-only initialization enabled" << std::endl;
+    }
+#endif
+
+#ifdef ENABLE_RERUN
+    if(prviz) {
+        slam.setRerunVisualizer(prviz);
+        slam.setMapLogFrequency(pparams->rerun_map_log_frequency_);
+        std::cout << "Rerun visualization enabled (map freq: " << pparams->rerun_map_log_frequency_ << ")" << std::endl;
+    }
+#else
+    std::cout << "Rerun visualization disabled (compile with -DENABLE_RERUN=ON)" << std::endl;
+#endif
 
     // Start SLAM thread
     std::thread slamthread(&SlamManager::run, &slam);
@@ -126,61 +154,38 @@ int main(int argc, char** argv) {
     std::string left_dir = dataset_path + "/stereo/left_images/";
     std::string right_dir = dataset_path + "/stereo/right_images/";
 
-    // Limit number of images if specified
-    size_t num_to_process = std::min(timestamps.size(), max_images);
-
     // Process images
-    std::cout << "\nProcessing " << num_to_process << " of " << timestamps.size() << " image pairs..." << std::endl;
+    std::cout << "\nProcessing " << timestamps.size() << " image pairs..." << std::endl;
     std::cout << "Press Ctrl+C to stop early\n" << std::endl;
-
-    // Create and start async image loader with parallel PNG decompression
-    // buffer_size=8, num_threads=16 for maximum parallelism
-    AsyncImageLoaderParallel loader(left_dir, right_dir, timestamps, 8, 16);
-    loader.start();
-    std::cout << "[AsyncImageLoaderParallel] Started with 16 threads, 8-frame buffer\n";
 
     auto start_time = std::chrono::steady_clock::now();
 
-    {
-        PROFILE_SCOPE("main_processing_loop");
+    for (size_t i = 0; i < timestamps.size(); i++) {
+        double ts = timestamps[i].first;
+        std::string img_name = timestamps[i].second;
 
-        size_t processed = 0;
-        while (processed < num_to_process) {
-            double ts;
-            cv::Mat left_img, right_img;
+        // Load images
+        std::string left_path = left_dir + img_name + ".png";
+        std::string right_path = right_dir + img_name + ".png";
 
-            // Try to get next pre-loaded image (non-blocking)
-            {
-                PROFILE_SCOPE("get_from_async_queue");
-                while (!loader.tryGet(ts, left_img, right_img)) {
-                    if (!loader.hasMore()) {
-                        goto done;  // No more images
-                    }
-                    // Image not ready yet, retry immediately (busy-wait)
-                    // In production, this should yield or sleep
-                }
-            }
+        cv::Mat left_img = cv::imread(left_path, cv::IMREAD_GRAYSCALE);
+        cv::Mat right_img = cv::imread(right_path, cv::IMREAD_GRAYSCALE);
 
-            // Add to SLAM
-            {
-                PROFILE_SCOPE("add_to_slam");
-                slam.addNewStereoImages(ts, left_img, right_img);
-            }
+        if (left_img.empty() || right_img.empty()) {
+            std::cerr << "Failed to read image pair: " << img_name << std::endl;
+            continue;
+        }
 
-            processed++;
+        // Add to SLAM
+        slam.addNewStereoImages(ts, left_img, right_img);
 
-            if (processed % 100 == 0) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start_time).count();
-                std::cout << "Processed " << processed << "/" << num_to_process
-                         << " images (elapsed: " << (elapsed / 1000.0) << "s, "
-                         << "fps: " << (processed * 1000.0 / elapsed) << ")" << std::endl;
-            }
-        }  // End while loop
-        done:;
-        // Stop async loader
-        loader.stop();
-    }  // PROFILE_SCOPE("main_processing_loop")
+        if ((i + 1) % 100 == 0) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - start_time).count();
+            std::cout << "Processed " << (i + 1) << "/" << timestamps.size()
+                     << " images (elapsed: " << elapsed << "s)" << std::endl;
+        }
+    }
 
     auto total_time = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start_time).count();
@@ -188,7 +193,7 @@ int main(int argc, char** argv) {
     std::cout << "\n========================================\n";
     std::cout << "Finished processing all images!\n";
     std::cout << "Total time: " << total_time << "s\n";
-    std::cout << "Average: " << (num_to_process / std::max(1.0, (double)total_time)) << " fps\n";
+    std::cout << "Average: " << (timestamps.size() / std::max(1.0, (double)total_time)) << " fps\n";
     std::cout << "========================================\n\n";
 
     std::cout << "Shutting down SLAM..." << std::endl;
@@ -212,11 +217,6 @@ int main(int argc, char** argv) {
     std::cout << "  - ov2slam_trajectory.txt\n";
     std::cout << "  - ov2slam_keyframes.txt\n";
     std::cout << "  - ov2slam_full_trajectory.txt\n";
-
-#ifdef ENABLE_PROFILING
-    std::cout << "\n";
-    SyncProfiler::getInstance().generateReport();
-#endif
 
     return 0;
 }

@@ -81,6 +81,7 @@ public:
 
     // Extrinsic parameters
     Sophus::SE3d T_left_right_;
+    Sophus::SE3d T_body_cam0_; // Left camera to body transform (extrinsics)
 
     // SLAM settings
     bool debug_, log_timings_;
@@ -160,4 +161,12 @@ public:
 
     // Final BA
     bool do_full_ba_;
+
+    // Rerun visualization parameters
+    int rerun_map_log_frequency_;
+    std::string rerun_output_file_;  // If empty, spawn live viewer; if set, save to .rrd file
+
+    // GPS and AHRS initialization
+    bool use_gps_init_ = false;
+    bool use_ahrs_init_ = false;
 };

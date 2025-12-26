@@ -26,32 +26,6 @@
 
 #include "slam_params.hpp"
 
-// Helper function to normalize rotation matrix using SVD
-// This ensures the matrix is orthogonal (R^T * R = I) to satisfy Sophus validation
-Eigen::Matrix4d normalizeTransform(const Eigen::Matrix4d& T) {
-    Eigen::Matrix3d R = T.block<3,3>(0,0);
-    Eigen::Vector3d t = T.block<3,1>(0,3);
-
-    // SVD decomposition: R = U * S * V^T
-    Eigen::JacobiSVD<Eigen::Matrix3d> svd(R, Eigen::ComputeFullU | Eigen::ComputeFullV);
-
-    // Closest orthogonal matrix to R is U * V^T
-    Eigen::Matrix3d R_normalized = svd.matrixU() * svd.matrixV().transpose();
-
-    // Ensure proper rotation (det = +1, not -1)
-    if (R_normalized.determinant() < 0) {
-        R_normalized = -R_normalized;
-    }
-
-    // Reconstruct the 4x4 transformation matrix
-    Eigen::Matrix4d T_normalized;
-    T_normalized.setIdentity();
-    T_normalized.block<3,3>(0,0) = R_normalized;
-    T_normalized.block<3,1>(0,3) = t;
-
-    return T_normalized;
-}
-
 SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
 
     std::cout << "\nSLAM Parameters are being setup...\n";
@@ -110,12 +84,24 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
         cv::cv2eigen(cvTbc0,Tbc0);
         cv::cv2eigen(cvTbc1,Tbc1);
 
-        // Normalize rotation matrices to ensure orthogonality for Sophus
-        // This fixes numerical precision issues from YAML -> OpenCV -> Eigen conversion
-        Tbc0 = normalizeTransform(Tbc0);
-        Tbc1 = normalizeTransform(Tbc1);
+        // Compute relative transform and orthogonalize rotation part
+        Eigen::Matrix4d T_rel = Tbc0.inverse() * Tbc1;
+        Eigen::Matrix3d R_rel = T_rel.block<3,3>(0,0);
 
-        T_left_right_ = Sophus::SE3d(Tbc0.inverse() * Tbc1);
+        // Use SVD to find nearest orthogonal rotation matrix
+        Eigen::JacobiSVD<Eigen::Matrix3d> svd(R_rel, Eigen::ComputeFullU | Eigen::ComputeFullV);
+        Eigen::Matrix3d U = svd.matrixU();
+        Eigen::Matrix3d V = svd.matrixV();
+        Eigen::Matrix3d R_rel_ortho = U * V.transpose();
+        // Ensure proper rotation (det = 1)
+        if (R_rel_ortho.determinant() < 0) {
+            U.col(2) *= -1;
+            R_rel_ortho = U * V.transpose();
+        }
+
+        T_rel.block<3,3>(0,0) = R_rel_ortho;
+        T_left_right_ = Sophus::SE3d(T_rel);
+        T_body_cam0_ = Sophus::SE3d(Tbc0);
     }
 
     finit_parallax_ = fsSettings["finit_parallax"];
@@ -195,6 +181,22 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
 
     // Apply Full BA?
     do_full_ba_ = static_cast<int>(fsSettings["do_full_ba"]);
+
+    // Rerun visualization
+    rerun_map_log_frequency_ = static_cast<int>(fsSettings["rerun_map_log_frequency"]);
+    if( rerun_map_log_frequency_ < 0 ) {
+        rerun_map_log_frequency_ = 10;  // Default value
+    }
+
+    // Rerun output file (empty = live viewer, non-empty = save to .rrd)
+    rerun_output_file_ = static_cast<std::string>(fsSettings["rerun_output_file"]);
+    if( rerun_output_file_ == "''" || rerun_output_file_ == "\"\"" ) {
+        rerun_output_file_.clear();  // Convert empty strings to actual empty
+    }
+
+    // GPS and AHRS initialization
+    use_gps_init_ = static_cast<int>(fsSettings["GPSInit.use_gps_init"]);
+    use_ahrs_init_ = static_cast<int>(fsSettings["GPSInit.use_ahrs_init"]);
 }
 
 void SlamParams::reset() {

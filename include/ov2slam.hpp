@@ -33,6 +33,18 @@
 #include "slam_params.hpp"
 #include "ros_visualizer.hpp"
 
+#ifdef ENABLE_RERUN
+#include "rerun_visualizer.hpp"
+#endif
+
+#ifdef ENABLE_GPS_INIT
+#include "gps_converter.hpp"
+#endif
+
+#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+#include "gt_loader.hpp"
+#endif
+
 #include "logger.hpp"
 
 #include "camera_calibration.hpp"
@@ -78,6 +90,15 @@ public:
     
     void visualizeFinalKFsTraj();
 
+#ifdef ENABLE_RERUN
+    void setRerunVisualizer(std::shared_ptr<RerunVisualizer> viz) { prviz_ = viz; }
+    void setMapLogFrequency(int freq);
+#endif
+
+#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+    void setGTLoader(std::shared_ptr<GTLoader> gt_loader) { gt_loader_ = gt_loader; }
+#endif
+
     int frame_id_ = -1;
     bool bnew_img_available_ = false;
 
@@ -89,6 +110,10 @@ public:
 
     std::shared_ptr<SlamParams> pslamstate_;
     std::shared_ptr<RosVisualizer> prosviz_;
+
+#ifdef ENABLE_RERUN
+    std::shared_ptr<RerunVisualizer> prviz_;
+#endif
 
     std::shared_ptr<CameraCalibration> pcalib_model_left_;
     std::shared_ptr<CameraCalibration> pcalib_model_right_;
@@ -107,4 +132,19 @@ public:
     std::queue<double> qimg_time_;
 
     std::mutex img_mutex_;
+
+#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+    std::shared_ptr<GTLoader> gt_loader_;
+#endif
+
+#ifdef ENABLE_GPS_INIT
+    std::unique_ptr<ov2slam::GPSConverter> gps_converter_;
+    bool bgps_init_done_ = false;
+    bool bgps_has_been_inited_ = false;  // Prevents re-init after reset
+#endif
+
+#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+    bool bahrs_init_done_ = false;
+    bool bahrs_has_been_inited_ = false;  // Prevents re-init after reset
+#endif
 };

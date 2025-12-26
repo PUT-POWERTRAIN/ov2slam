@@ -33,12 +33,8 @@
 #include "sync_profiler.hpp"
 #endif
 
-#ifdef STANDALONE
-// Include stub with pcl definitions
-#include "stub_ros_visualizer.hpp"
-#else
-#include <pcl_ros/point_cloud.h>
-#endif
+// Include PCL stub definitions (no ROS dependency)
+#include "ros_visualizer.hpp"
 
 #include "slam_params.hpp"
 #include "frame.hpp"

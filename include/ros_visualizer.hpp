@@ -1,312 +1,258 @@
 /**
-*    This file is part of OV²SLAM.
-*    
-*    Copyright (C) 2020 ONERA
-*
-*    For more information see <https://github.com/ov2slam/ov2slam>
-*
-*    OV²SLAM is free software: you can redistribute it and/or modify
-*    it under the terms of the GNU General Public License as published by
-*    the Free Software Foundation, either version 3 of the License, or
-*    (at your option) any later version.
-*
-*    OV²SLAM is distributed in the hope that it will be useful,
-*    but WITHOUT ANY WARRANTY; without even the implied warranty of
-*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-*    GNU General Public License for more details.
-*
-*    You should have received a copy of the GNU General Public License
-*    along with OV²SLAM.  If not, see <https://www.gnu.org/licenses/>.
-*
-*    Authors: Maxime Ferrera     <maxime.ferrera at gmail dot com> (ONERA, DTIS - IVA),
-*             Alexandre Eudes    <first.last at onera dot fr>      (ONERA, DTIS - IVA),
-*             Julien Moras       <first.last at onera dot fr>      (ONERA, DTIS - IVA),
-*             Martial Sanfourche <first.last at onera dot fr>      (ONERA, DTIS - IVA)
+* Visualizer for OV2SLAM - Saves trajectories to files
+* This replaces ROS visualization with file-based output
 */
+
+#ifndef ROS_VISUALIZER_HPP
+#define ROS_VISUALIZER_HPP
+
 #pragma once
 
-
-#include <ros/ros.h>
-
-#include <std_msgs/Header.h>
-#include <std_msgs/Float32.h>
-#include <std_msgs/Bool.h>
-
-#include <sensor_msgs/Imu.h>
-#include <sensor_msgs/PointCloud.h>
-#include <sensor_msgs/Image.h>
-#include <sensor_msgs/image_encodings.h>
-
-#include <cv_bridge/cv_bridge.h>
-
-#include <nav_msgs/Path.h>
-#include <nav_msgs/Odometry.h>
-
-#include <geometry_msgs/PointStamped.h>
-#include <geometry_msgs/PoseStamped.h>
-#include <geometry_msgs/Quaternion.h>
-#include <geometry_msgs/TransformStamped.h>
-
-#include <visualization_msgs/Marker.h>
-#include <tf/transform_broadcaster.h>
-
-#include <pcl_ros/point_cloud.h>
-
 #include <sophus/se3.hpp>
-
-#include "camera_visualizer.hpp"
-
+#include <opencv2/opencv.hpp>
+#include <fstream>
 #include <iostream>
+#include <iomanip>
+#include <vector>
+#include <memory>
+
+// /////////////////////////////////////////////////////////////////////////////
+// ROS STUBS - Minimal replacements for ROS types
+// /////////////////////////////////////////////////////////////////////////////
+
+namespace ros {
+
+struct NodeHandle {
+    NodeHandle() {}
+};
+
+struct Publisher {
+    int getNumSubscribers() const { return 0; }
+    template<typename T> void publish(const T&) {}
+};
+
+struct Time {
+    double time_;
+    Time(double t) : time_(t) {}
+    double toSec() const { return time_; }
+    static Time now() { return Time(0.0); }
+};
+
+inline void requestShutdown() {
+    // Stub - does nothing in OV2SLAM
+}
+
+} // namespace ros
+
+namespace sensor_msgs {
+struct Image {
+    std::string header;
+};
+struct Imu {};
+} // namespace sensor_msgs
+
+namespace geometry_msgs {
+struct Point { double x, y, z; };
+struct Quaternion { double x, y, z, w; };
+struct PoseStamped {
+    std::string header;
+    Point pose;
+    Quaternion orientation;
+};
+} // namespace geometry_msgs
+
+namespace visualization_msgs {
+struct Marker {
+    std::string header;
+    int type;
+    struct Color { double a, r, g, b; } color;
+    struct Scale { double x; } scale;
+    std::vector<geometry_msgs::Point> points;
+};
+struct MarkerArray {
+    std::vector<Marker> markers;
+};
+} // namespace visualization_msgs
+
+namespace nav_msgs {
+struct Path {};
+struct Odometry {};
+} // namespace nav_msgs
+
+namespace std_msgs {
+struct Header {
+    std::string frame_id;
+    double stamp;
+};
+struct ColorRGBA {
+    float r, g, b, a;
+    ColorRGBA() : r(0), g(0), b(0), a(1) {}
+};
+struct Float32 {};
+struct Bool {};
+} // namespace std_msgs
+
+namespace pcl {
+template<typename T>
+struct PointCloud {
+    std::string header;
+    std::vector<T> points;
+    // Ptr alias
+    using Ptr = std::shared_ptr<PointCloud<T>>;
+    using ConstPtr = std::shared_ptr<const PointCloud<T>>;
+};
+
+// Stub for PointXYZRGB
+struct PointXYZRGB {
+    float x, y, z;
+    uint8_t r, g, b;
+    PointXYZRGB() : x(0), y(0), z(0), r(255), g(255), b(255) {}
+    PointXYZRGB(float _x, float _y, float _z) : x(_x), y(_y), z(_z), r(255), g(255), b(255) {}
+    PointXYZRGB(float _x, float _y, float _z, uint8_t _r, uint8_t _g, uint8_t _b)
+        : x(_x), y(_y), z(_z), r(_r), g(_g), b(_b) {}
+};
+
+// Specialization for PointXYZRGB
+template<>
+struct PointCloud<PointXYZRGB> {
+    std::string header;
+    std::vector<PointXYZRGB> points;
+    using Ptr = std::shared_ptr<PointCloud<PointXYZRGB>>;
+    using ConstPtr = std::shared_ptr<const PointCloud<PointXYZRGB>>;
+};
+
+} // namespace pcl
+
+// CameraPoseVisualization stub
+struct CameraPoseVisualization {
+    CameraPoseVisualization() {}
+    CameraPoseVisualization(double r, double g, double b, double a) {}
+    void reset() {}
+    void add_pose(const Eigen::Vector3d& t, const Eigen::Quaterniond& q) {}
+    void setImageBoundaryColor(double r, double g, double b) {}
+    void setOpticalCenterConnectorColor(double r, double g, double b) {}
+    void setScale(double s) {}
+    void setLineWidth(double w) {}
+    void publish_by(ros::Publisher& pub, const std::string& header) {}
+};
+
+// /////////////////////////////////////////////////////////////////////////////
+// STANDALONE VISUALIZER - Mimics RosVisualizer interface without ROS
+// /////////////////////////////////////////////////////////////////////////////
 
 class RosVisualizer {
-    
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    
-    RosVisualizer(ros::NodeHandle &n)
-        : cameraposevisual_(1, 0, 0, 1)
-    {
-        std::cout << "\nROS visualizer is being created...\n";
 
-        pub_image_track_ = n.advertise<sensor_msgs::Image>("image_track", 1000);
+    RosVisualizer(ros::NodeHandle& n) {
+        std::cout << "\n[OV2SLAM] Visualizer created\n";
 
-        pub_vo_traj_ = n.advertise<visualization_msgs::Marker>("vo_traj", 1000);
-        pub_vo_pose_ = n.advertise<geometry_msgs::PoseStamped>("vo_pose", 1000);
-
-        vo_traj_msg_.type = visualization_msgs::Marker::LINE_STRIP;
-        vo_traj_msg_.color.a = 1.0;
-        vo_traj_msg_.color.r = 0.25;
-        vo_traj_msg_.color.g = 1.0;
-        vo_traj_msg_.color.b = 0.25;
-        vo_traj_msg_.scale.x = 0.02;
-
-        camera_pose_visual_pub_ = n.advertise<visualization_msgs::MarkerArray>("cam_pose_visual", 1000);
-
-        cameraposevisual_.setScale(0.1);
-        cameraposevisual_.setLineWidth(0.01);
-
-        pub_point_cloud_ = n.advertise<pcl::PointCloud<pcl::PointXYZRGB>>("point_cloud", 1000);
-        
-        pub_kfs_traj_ = n.advertise<visualization_msgs::Marker>("kfs_traj", 1000);
-        pub_kfs_pose_ = n.advertise<visualization_msgs::MarkerArray>("local_kfs_window", 1000);
-
-        pub_final_kfs_traj_ = n.advertise<visualization_msgs::Marker>("final_kfs_traj", 1000);
-
-        kfs_traj_msg_ = vo_traj_msg_;
-        kfs_traj_msg_.color.r = 0.25;
-        kfs_traj_msg_.color.g = 0.25;
-        kfs_traj_msg_.color.b = 1.;
-
-        final_kfs_traj_msg_ = vo_traj_msg_;
-        final_kfs_traj_msg_.color.r = 0.75;
-        final_kfs_traj_msg_.color.g = 0.25;
-        final_kfs_traj_msg_.color.b = 0.25;
-    }
-
-    void pubTrackImage(const cv::Mat &imgTrack, const double time)
-    {
-        if( pub_image_track_.getNumSubscribers() == 0 ) {
-            return;
+        // Open output files
+        traj_file_.open("ov2slam_trajectory.txt");
+        if (traj_file_.is_open()) {
+            traj_file_ << "# timestamp tx ty tz qx qy qz qw\n";
         }
 
-        std_msgs::Header header;
-        header.frame_id = "world";
-        header.stamp = ros::Time(time);
-        sensor_msgs::ImagePtr imgTrackMsg = cv_bridge::CvImage(header, "rgb8", imgTrack).toImageMsg();
-        pub_image_track_.publish(imgTrackMsg);
-    }
-
-    void pubVO(const Sophus::SE3d &Twc, const double time)
-    {   
-        // 1. Publish marker message
-        // =========================
-        vo_traj_msg_.header.stamp = ros::Time(time);
-        vo_traj_msg_.header.frame_id = "world";
-
-        geometry_msgs::Point p;
-        const Eigen::Vector3d &twc = Twc.translation();
-        p.x = twc.x(); p.y = twc.y(); p.z = twc.z();
-
-        if( p.x > 50. || p.y > 50. || p.z > 50 ) {
-            if( vo_traj_msg_.scale.x < 0.1 ) {
-                vo_traj_msg_.scale.x *= 20;  
-                kfs_traj_msg_.scale.x *= 20; 
-                final_kfs_traj_msg_.scale.x *= 20;     
-            }
+        kfs_traj_file_.open("ov2slam_keyframes.txt");
+        if (kfs_traj_file_.is_open()) {
+            kfs_traj_file_ << "# keyframe tx ty tz qx qy qz qw\n";
         }
 
-        vo_traj_msg_.points.push_back(p);
-
-        pub_vo_traj_.publish(vo_traj_msg_);
-
-        // 2. Publish Pose Stamped + tf
-        // ============================
-        geometry_msgs::PoseStamped Twc_msg;
-        geometry_msgs::Quaternion q;
-        const Eigen::Quaterniond eigen_q(Twc.unit_quaternion());
-
-        Twc_msg.pose.position = p;
-        q.x = eigen_q.x(); q.y = eigen_q.y();
-        q.z = eigen_q.z(); q.w = eigen_q.w();
-
-        Twc_msg.pose.orientation = q;
-
-        Twc_msg.header = vo_traj_msg_.header;
-
-        pub_vo_pose_.publish(Twc_msg);
-
-        tf::Transform transform;
-        transform.setOrigin(tf::Vector3(p.x, p.y, p.z));
-        tf::Quaternion qtf(q.x, q.y, q.z, q.w);
-        transform.setRotation(qtf);
-
-        static tf::TransformBroadcaster br;
-        br.sendTransform(tf::StampedTransform(transform, ros::Time(time), "world", "camera"));
-
-        // 3. Publish camera visual
-        // =========================
-        cameraposevisual_.reset();
-        cameraposevisual_.add_pose(twc, eigen_q);
-        cameraposevisual_.setImageBoundaryColor(1, 0, 0);
-        cameraposevisual_.setOpticalCenterConnectorColor(1, 0, 0);
-        cameraposevisual_.publish_by(camera_pose_visual_pub_, Twc_msg.header);
-
-        // if( vo_traj_msg_.points.size() >= 3600 ) {
-        //     size_t nbpts = vo_traj_msg_.points.size();
-        //     std::vector<geometry_msgs::Point> vtmp;
-        //     // if( nbpts / 20 < 3600 ) {
-        //         vtmp.reserve(nbpts / 20);
-        //         for( size_t i = 0 ; i < nbpts ; i+=20 ) {
-        //             vtmp.push_back(vo_traj_msg_.points.at(i));
-        //         }
-        //     // } 
-        //     // else {
-        //     //     vtmp.reserve(nbpts / 100);
-        //     //     for( size_t i = 0 ; i < nbpts ; i+=100 ) {
-        //     //         vtmp.push_back(vo_traj_msg_.points.at(i));
-        //     //     }
-        //     // }
-
-        //     vo_traj_msg_.points.swap(vtmp);
-        // }
-
-        return;
-    }
-
-    void addVisualKF(const Sophus::SE3d &Twc) 
-    {
-        const Eigen::Quaterniond eigen_q(Twc.unit_quaternion());
-        CameraPoseVisualization kfposevisual(0, 0, 1, 1);
-        kfposevisual.add_pose(Twc.translation(), eigen_q);
-        kfposevisual.setImageBoundaryColor(0, 0, 1);
-        kfposevisual.setOpticalCenterConnectorColor(0, 0, 1);
-        vkeyframesposevisual_.push_back(kfposevisual);
-    }
-
-    void pubVisualKFs(const double time) 
-    {
-        if( pub_kfs_pose_.getNumSubscribers() == 0 ) {
-            return;
+        full_traj_file_.open("ov2slam_full_trajectory.txt");
+        if (full_traj_file_.is_open()) {
+            full_traj_file_ << "# timestamp tx ty tz qx qy qz qw\n";
         }
 
-        std_msgs::Header header;
-        header.frame_id = "world";
-        header.stamp = ros::Time(time);
+        std::cout << "[OV2SLAM] Results will be saved to:\n";
+        std::cout << "  - ov2slam_trajectory.txt (VO trajectory)\n";
+        std::cout << "  - ov2slam_keyframes.txt (keyframe poses)\n";
+        std::cout << "  - ov2slam_full_trajectory.txt (optimized trajectory)\n";
+    }
 
-        visualization_msgs::MarkerArray markerArray_msg;
+    ~RosVisualizer() {
+        if (traj_file_.is_open()) traj_file_.close();
+        if (kfs_traj_file_.is_open()) kfs_traj_file_.close();
+        if (full_traj_file_.is_open()) full_traj_file_.close();
+        std::cout << "\n[OV2SLAM] Visualizer closed, trajectories saved\n";
+    }
 
-        int j = 0;
+    void pubTrackImage(const cv::Mat& imgTrack, const double time) {
+        // Optionally save debug images if needed
+    }
 
-        for( auto &camposeviz : vkeyframesposevisual_ )
-        {
-            for( auto &marker : camposeviz.m_markers )
-            {
-                marker.header = header;
-                marker.id += j;
-                markerArray_msg.markers.push_back(marker);
-            }
-            j++;
+    void pubVO(const Sophus::SE3d& Twc, const double time) {
+        if (traj_file_.is_open()) {
+            const Eigen::Vector3d t = Twc.translation();
+            const Eigen::Quaterniond q = Twc.unit_quaternion();
+            traj_file_ << std::fixed << std::setprecision(9)
+                       << time << " "
+                       << t.x() << " " << t.y() << " " << t.z() << " "
+                       << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
+            traj_file_.flush();
         }
-
-        pub_kfs_pose_.publish(markerArray_msg);
-
-        vkeyframesposevisual_.clear();
     }
 
-    void pubPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcloud, const double time) 
-    {
-        if( pub_point_cloud_.getNumSubscribers() == 0 ) {
-            return;
+    void addVisualKF(const Sophus::SE3d& Twc) {
+        keyframes_.push_back(Twc);
+    }
+
+    void pubVisualKFs(const double time) {
+        // Keyframes are tracked but not published here
+    }
+
+    void pubPointCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr pcloud, const double time) {
+        // Optionally save point cloud
+    }
+
+    void addKFsTraj(const Sophus::SE3d& Twc) {
+        if (kfs_traj_file_.is_open()) {
+            const Eigen::Vector3d t = Twc.translation();
+            const Eigen::Quaterniond q = Twc.unit_quaternion();
+            kfs_traj_file_ << std::fixed << std::setprecision(9)
+                          << t.x() << " " << t.y() << " " << t.z() << " "
+                          << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
         }
-
-        std_msgs::Header header;
-        header.frame_id = "world";
-        header.stamp = ros::Time(time);
-
-        pcloud->header = pcl_conversions::toPCL(header);
-        pub_point_cloud_.publish(pcloud);
     }
 
-    void addKFsTraj(const Sophus::SE3d &Twc)
-    {
-        geometry_msgs::Point p;
-        const Eigen::Vector3d twc = Twc.translation();
-        p.x = twc.x(); p.y = twc.y(); p.z = twc.z();
-
-        kfs_traj_msg_.points.push_back(p);
+    void clearKFsTraj() {
+        keyframes_.clear();
     }
 
-    void clearKFsTraj()
-    {   
-        kfs_traj_msg_.points.clear();
+    void pubKFsTraj(const double time) {
+        kfs_traj_file_.flush();
     }
 
-    void pubKFsTraj(const double time)
-    {   
-        if( pub_kfs_traj_.getNumSubscribers() == 0 ) {
-            return;
+    void pubFinalKFsTraj(const Sophus::SE3d& Twc, const double time) {
+        if (full_traj_file_.is_open()) {
+            const Eigen::Vector3d t = Twc.translation();
+            const Eigen::Quaterniond q = Twc.unit_quaternion();
+            full_traj_file_ << std::fixed << std::setprecision(9)
+                           << time << " "
+                           << t.x() << " " << t.y() << " " << t.z() << " "
+                           << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
+            full_traj_file_.flush();
         }
-
-        kfs_traj_msg_.header.stamp = ros::Time(time);
-        kfs_traj_msg_.header.frame_id = "world";
-
-        pub_kfs_traj_.publish(kfs_traj_msg_);
     }
 
-    void pubFinalKFsTraj(const Sophus::SE3d &Twc, const double time)
-    {   
-        if( pub_final_kfs_traj_.getNumSubscribers() == 0 ) {
-            return;
-        }
-
-        final_kfs_traj_msg_.header.stamp = ros::Time(time);
-        final_kfs_traj_msg_.header.frame_id = "world";
-
-        geometry_msgs::Point p;
-        const Eigen::Vector3d twc = Twc.translation();
-        p.x = twc.x(); p.y = twc.y(); p.z = twc.z();
-
-        final_kfs_traj_msg_.points.push_back(p);
-
-        pub_final_kfs_traj_.publish(final_kfs_traj_msg_);
-
-        return;
-    }
-
+    // Public members required by SLAM code
     ros::Publisher pub_image_track_;
-
-    ros::Publisher pub_vo_traj_, pub_vo_pose_;
-    visualization_msgs::Marker vo_traj_msg_;
-
+    ros::Publisher pub_vo_traj_;
+    ros::Publisher pub_vo_pose_;
     ros::Publisher camera_pose_visual_pub_;
     CameraPoseVisualization cameraposevisual_;
-
     ros::Publisher pub_point_cloud_;
-
     ros::Publisher pub_kfs_pose_;
     std::vector<CameraPoseVisualization> vkeyframesposevisual_;
+    ros::Publisher pub_kfs_traj_;
+    ros::Publisher pub_final_kfs_traj_;
+    visualization_msgs::Marker vo_traj_msg_;
+    visualization_msgs::Marker kfs_traj_msg_;
+    visualization_msgs::Marker final_kfs_traj_msg_;
 
-    ros::Publisher pub_kfs_traj_, pub_final_kfs_traj_;
-
-    visualization_msgs::Marker kfs_traj_msg_, final_kfs_traj_msg_;
+private:
+    std::vector<Sophus::SE3d> keyframes_;
+    std::ofstream traj_file_;
+    std::ofstream kfs_traj_file_;
+    std::ofstream full_traj_file_;
 };
+#endif // ROS_VISUALIZER_HPP
