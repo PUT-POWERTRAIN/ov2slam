@@ -2,6 +2,7 @@
 #include "gt_loader.hpp"
 #include "map_point.hpp"
 #include <iostream>
+#include <limits>
 
 RerunVisualizer::RerunVisualizer(const std::string& output_file) {
 #ifdef ENABLE_RERUN
@@ -32,7 +33,12 @@ RerunVisualizer::RerunVisualizer(const std::string& output_file) {
 RerunVisualizer::~RerunVisualizer() {
 #ifdef ENABLE_RERUN
     if( rec_ ) {
-        std::cout << "[Rerun] Shutting down...\n";
+        std::cout << "[Rerun] Flushing data to disk...\n";
+        auto result = rec_->flush_blocking(std::numeric_limits<double>::infinity());
+        if( result.is_err() ) {
+            std::cerr << "[Rerun] WARNING: Flush failed: " << result.description << "\n";
+        }
+        std::cout << "[Rerun] Data flushed, shutting down...\n";
         rec_.reset();
     }
 #endif
