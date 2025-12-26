@@ -31,9 +31,10 @@ bool GTLoader::loadFromGPS(const std::string& gps_file) {
         GTPose pose;
         char ns, ew;
 
-        // Format: timestamp lat N/S lon E/W heading quality n_sat hdop altitude
+        // Format: timestamp gps_time lat N/S lon E/W heading quality n_sat hdop altitude
+        // (11 columns total)
         double quality, num_sats, hdop;
-        iss >> pose.timestamp >> pose.latitude >> ns >> pose.longitude >> ew
+        iss >> pose.timestamp >> pose.gps_time >> pose.latitude >> ns >> pose.longitude >> ew
             >> pose.heading >> quality >> num_sats >> hdop >> pose.altitude;
 
         // Convert N/S and E/W to signed values
@@ -52,6 +53,16 @@ bool GTLoader::loadFromGPS(const std::string& gps_file) {
 
     std::cout << "[GTLoader] Loaded " << gt_poses_.size() << " GPS poses from " << gps_file << std::endl;
 
+    // Debug: Show first GPS point to verify parsing
+    if( gt_poses_.size() > 0 ) {
+        std::cout << "[GTLoader] First GPS point:" << std::endl;
+        std::cout << "  timestamp: " << gt_poses_[0].timestamp << std::endl;
+        std::cout << "  latitude: " << gt_poses_[0].latitude << std::endl;
+        std::cout << "  longitude: " << gt_poses_[0].longitude << std::endl;
+        std::cout << "  altitude: " << gt_poses_[0].altitude << std::endl;
+        std::cout << "  heading: " << gt_poses_[0].heading << std::endl;
+    }
+
     // Set origin from first point
     origin_lat_ = first_lat;
     origin_lon_ = first_lon;
@@ -60,6 +71,20 @@ bool GTLoader::loadFromGPS(const std::string& gps_file) {
 
     // Convert all poses to local coordinates
     convertToLocal();
+
+    // Debug: Show trajectory bounds
+    if( positions_.size() > 1 ) {
+        Eigen::Vector3d min_pos = positions_[0];
+        Eigen::Vector3d max_pos = positions_[0];
+        for(const auto& pos : positions_) {
+            min_pos = min_pos.cwiseMin(pos);
+            max_pos = max_pos.cwiseMax(pos);
+        }
+        std::cout << "[GTLoader] Trajectory bounds (local XYZ):" << std::endl;
+        std::cout << "  Min: x=" << min_pos.x() << ", y=" << min_pos.y() << ", z=" << min_pos.z() << std::endl;
+        std::cout << "  Max: x=" << max_pos.x() << ", y=" << max_pos.y() << ", z=" << max_pos.z() << std::endl;
+        std::cout << "  Range: dx=" << (max_pos.x() - min_pos.x()) << ", dy=" << (max_pos.y() - min_pos.y()) << ", dz=" << (max_pos.z() - min_pos.z()) << std::endl;
+    }
 
     return true;
 }
@@ -188,8 +213,10 @@ Eigen::Vector3d GTLoader::geodeticToLocal(double lat, double lon, double alt) {
     double alt_offset = alt - origin_alt_;
 
     // Convert to meters
-    double x = lon_offset * EARTH_RADIUS * std::cos(lat_rad * M_PI / 180.0);
-    double y = lat_offset * EARTH_RADIUS;
+    // NOTE: SLAM uses X=North, Y=East coordinate system
+    // GPS lat_offset (North) → X, lon_offset (East) → Y
+    double x = lat_offset * EARTH_RADIUS;                          // X = North
+    double y = lon_offset * EARTH_RADIUS * std::cos(lat_rad);      // Y = East
     double z = alt_offset;
 
     return Eigen::Vector3d(x, y, z);

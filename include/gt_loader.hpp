@@ -35,7 +35,20 @@
  *
  * GPS FILE FORMAT:
  * ----------------
- * timestamp lat N/S lon E/W heading quality n_sat hdop altitude
+ * timestamp gps_time lat N/S lon E/W heading quality n_sat hdop altitude
+ *
+ * Columns (11 total):
+ * 1. timestamp    - Unix timestamp (seconds since epoch)
+ * 2. gps_time     - GPS time of week
+ * 3. lat          - Latitude in degrees
+ * 4. N/S          - North/South indicator (N or S)
+ * 5. lon          - Longitude in degrees
+ * 6. E/W          - East/West indicator (E or W)
+ * 7. heading      - Heading in degrees
+ * 8. quality      - GPS quality indicator
+ * 9. n_sat        - Number of satellites
+ * 10. hdop        - Horizontal dilution of precision
+ * 11. altitude    - Altitude in meters
  */
 class GTLoader {
 public:
@@ -60,6 +73,7 @@ public:
 private:
     struct GTPose {
         double timestamp;
+        double gps_time;       // GPS time of week (parsed but not used)
         double latitude;
         double longitude;
         double altitude;
