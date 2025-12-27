@@ -1,7 +1,12 @@
 # Build outputs
+build/
 build_standalone/
 Thirdparty/*/build/
 Thirdparty/*/install/
+
+# Rerun recordings
+*.rrd
+*.rrd.backup
 
 # Test executables
 test_io_only
@@ -10,6 +15,11 @@ test_parallel_png
 test_disk_benchmark
 test_pgm_vs_png
 convert_pgm_test
+test/*.cpp
+test/QUICKSTART.md
+
+# Temporary files
+tmp/
 
 # SLAM output files
 *.txt
