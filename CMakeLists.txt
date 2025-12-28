@@ -103,6 +103,7 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(backward_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 ###########
 ## Build ##
@@ -265,32 +266,23 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-add_executable(imu_transform src/imu_transform.cpp)
+add_executable(occupancy_grid src/occupancy_grid.cpp)
 
-ament_target_dependencies(imu_transform
+ament_target_dependencies(occupancy_grid
   rclcpp
   tf2_msgs
   geometry_msgs
+  nav_msgs
   sensor_msgs
-  tf2
-  tf2_geometry_msgs
 )
 
-target_link_libraries(imu_transform
-  Eigen3::Eigen
-  Sophus::Sophus
-  Ceres::ceres
-)
-
-target_include_directories(imu_transform
+target_include_directories(occupancy_grid
   PRIVATE
     ${PROJECT_SOURCE_DIR}/include/
-    ${EIGEN3_INCLUDE_DIRS}
-    ${CERES_INCLUDE_DIRS}
 )
 
 install(TARGETS
-  imu_transform
+  occupancy_grid
   DESTINATION lib/${PROJECT_NAME}
 )
 

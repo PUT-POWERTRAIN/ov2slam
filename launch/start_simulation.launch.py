@@ -62,7 +62,26 @@ def generate_launch_description():
         default_value='/datasets/ahrs.txt',
         description='enables imu feeder'
     )
-
+    z_min_arg = DeclareLaunchArgument(
+        'z_min',
+        default_value='0.0',
+        description='filtracja punktów, min wartosc z'
+    )
+    z_max_arg = DeclareLaunchArgument(
+        'z_max',
+        default_value='3.0',
+        description='filtracja punktów, max wartosc z'
+    )
+    hit_thresh_arg = DeclareLaunchArgument(
+        'hit_thresh',
+        default_value='1',
+        description='ilosc trafien w komórke na occupancy grid aby uznac za zajete'
+    )
+    res_arg = DeclareLaunchArgument(
+        'res',
+        default_value='0.5',
+        description='rozdzielczość dla occupancy grid'
+    )
     # Konfiguracja
     params_file = LaunchConfiguration('params_file')
     images_folder_left = LaunchConfiguration('images_folder_left')
@@ -75,6 +94,10 @@ def generate_launch_description():
     loop = LaunchConfiguration('loop')
     enable_imu = LaunchConfiguration('enable_imu')
     imu_path = LaunchConfiguration('imu_path')
+    z_min = LaunchConfiguration("z_min")
+    z_max = LaunchConfiguration("z_max")
+    hit_thresh = LaunchConfiguration("hit_thresh")
+    res = LaunchConfiguration("res")
 
     # Node: OV2SLAM
     ov2slam_node = Node(
@@ -110,6 +133,21 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
+    occupancy_grid_node = Node(
+        package='ov2slam',
+        executable='occupancy_grid',
+        name='occupancy_grid',
+        output='screen',
+        parameters=[{
+            'z_min': z_min,
+            'z_max': z_max,
+            'hit_thresh': hit_thresh,
+            'res': res,
+        }],
+        respawn=False,
+        emulate_tty=True,
+    )
+
     feeder_imu_node = Node(
         package='ov2slam',
         executable='feeder_imu',
@@ -121,15 +159,6 @@ def generate_launch_description():
             'imu_path': imu_path,
         }],
         condition = IfCondition(enable_imu),
-        respawn=False,
-        emulate_tty=True,
-    )
-
-    imu_transform_node = Node(
-        package='ov2slam',
-        executable='imu_transform',
-        name='imu_transform',
-        output='screen',
         respawn=False,
         emulate_tty=True,
     )
@@ -152,7 +181,7 @@ def generate_launch_description():
     # Opóźnij start FEEDER_PNG o 3 sekundy
     delayed_feeder = TimerAction(
         period=3.0,
-        actions=[feeder_png_node, feeder_imu_node, imu_transform_node]
+        actions=[feeder_png_node, feeder_imu_node, occupancy_grid_node]
     )
 
     # Opóźnij start RViz o 2 sekundy
@@ -179,6 +208,10 @@ def generate_launch_description():
         loop_arg,
         enable_imu_arg,
         imu_path_arg,
+        z_min_arg,
+        z_max_arg,
+        hit_thresh_arg,
+        res_arg,
         # Nodes
         ov2slam_node,
         delayed_rviz,
