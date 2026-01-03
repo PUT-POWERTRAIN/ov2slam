@@ -1,0 +1,43 @@
+services:
+  claude-code:
+    build:
+      context: .
+      args:
+        USER_ID: ${USER_ID:-1000}
+        GROUP_ID: ${GROUP_ID:-1000}
+        USERNAME: ${USER:-wojtess}
+
+    image: claude-code:latest
+
+    # Working directory - ścieżka w kontenerze musi zgadzać się z nazwą projektu w ~/.claude/projects/
+    working_dir: ${PROJECT_PATH}
+
+    environment:
+      # Klucz API Anthropic
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
+
+      # Bazowy URL dla API (domyślny lub customowy)
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+
+      # Home directory w kontenerze
+      - HOME=/home/${USER:-wojtess}
+
+    # Volume mounts - tylko określone foldery
+    volumes:
+      # Bieżący katalog jako workspace (ścieżka zgodna z nazwą projektu w ~/.claude/projects/)
+      - .:${PROJECT_PATH}
+
+      # Konfiguracja Claude Code (plik w home usera)
+      - ${CLAUDE_CONFIG_PATH:-${HOME}/.claude}:/home/${USER:-wojtess}/.claude
+
+      # Pliki .claude.json - jeśli masz go w innej lokalizacji
+      - ${CLAUDE_JSON_PATH:-${HOME}/.claude.json}:/home/${USER:-wojtess}/.claude.json
+
+    # Utrzymanie stdin open dla interaktywnej pracy
+    stdin_open: true
+    tty: true
+
+    restart: unless-stopped
+
+    # Nazwa kontenera
+    container_name: claude-code-container
