@@ -1,40 +1,131 @@
-# Debian Bookworm z Node.js i Pythonem
+# Debian Bookworm with OV2SLAM dependencies and development tools
 FROM debian:bookworm
 
-# Instalacja Node.js 22 (repozytorium NodeSource)
+# Install basic system tools
 RUN apt-get update && \
-    apt-get install -y curl gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y \
+        curl \
+        gnupg \
+        sudo \
+        bash \
+        git \
+        vim \
+        nano \
+        wget \
+        build-essential \
+        cmake \
+        ninja-build \
+        pkg-config \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22 (NodeSource repository)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
-    apt-get install -y python3 python3-pip python3-venv git vim nano sudo bash && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# ARG dla user ID (przekazywany z docker-compose lub build-arg)
+# Install Python 3 and pip
+RUN apt-get update && \
+    apt-get install -y \
+        python3 \
+        python3-pip \
+        python3-venv \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# === OV2SLAM DEPENDENCIES ===
+
+# Install Eigen3 (linear algebra library)
+RUN apt-get update && \
+    apt-get install -y \
+        libeigen3-dev \
+        libeigen3-doc \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# Install OpenCV 4 with contrib modules
+RUN apt-get update && \
+    apt-get install -y \
+        libopencv-dev \
+        libopencv-contrib-dev \
+        libopencv-calib3d-dev \
+        libopencv-features2d-dev \
+        libopencv-imgproc-dev \
+        libopencv-video-dev \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# Install Ceres Solver dependencies and build Ceres
+RUN apt-get update && \
+    apt-get install -y \
+        libgoogle-glog-dev \
+        libgtest-dev \
+        libsuitesparse-dev \
+        libatlas-base-dev \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# Ceres Solver - install from source if needed, or try package
+# Debian bookworm has ceres-solver 2.1+
+RUN apt-get update && \
+    apt-get install -y \
+        libceres-dev \
+        libceres2 \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# Install Sophus (Lie groups) - build from source
+WORKDIR /tmp
+RUN git clone --depth 1 --branch 1.1.0 https://github.com/strasdat/Sophus.git && \
+    mkdir -p sophus/build && \
+    cd sophus/build && \
+    cmake .. && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/sophus
+
+# Install OpenGV (optional but recommended)
+RUN apt-get update && \
+    apt-get install -y \
+        libopengv-dev \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# Install GeographicLib (for GPS coordinate conversion)
+RUN apt-get update && \
+    apt-get install -y \
+        libgeographic++-dev \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
+# === OPTIONAL: iBoW-LCD (Loop Closure Detection) ===
+# Build from Thirdparty directory when building OV2SLAM
+# Included in project Thirdparty/iBoW-LCD
+
+# === PYTHON PACKAGES (for data analysis, visualization) ===
+RUN pip3 install --no-cache-dir --break-system-packages \
+    numpy \
+    scipy \
+    matplotlib \
+    pillow
+
+# === INSTALL CLAUDE CODE ===
+RUN npm install -g @anthropic-ai/claude-code
+
+# === USER SETUP ===
 ARG USER_ID=1000
 ARG GROUP_ID=1000
 ARG USERNAME=wojtess
 
-# Tworzenie użytkownika
 RUN groupadd -g ${GROUP_ID} ${USERNAME} && \
     useradd -u ${USER_ID} -g ${GROUP_ID} -m -s /bin/bash ${USERNAME} && \
     echo '${USERNAME} ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-# Instalacja Claude Code globalnie przez npm
-RUN npm install -g @anthropic-ai/claude-code
+# === WORKSPACE SETUP ===
+WORKDIR /workspace
 
-# Instalacja bibliotek do symulacji plynow (CFD)
-RUN pip3 install --break-system-packages --no-cache-dir \
-    numpy \
-    scipy \
-    matplotlib \
-    fluidsim \
-    jax \
-    jax-cfd \
-    taichi
-
-# Przelaczenie na uzytkownika
+# Default to bash shell
 USER ${USERNAME}
-
-# Domyślna komenda - bash interaktywny
 CMD ["/bin/bash"]
