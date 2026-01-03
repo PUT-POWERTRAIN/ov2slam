@@ -12,12 +12,15 @@
 #include <thread>
 #include <fstream>
 #include <chrono>
+#include <iomanip>
+#include <climits>
 #include <opencv2/opencv.hpp>
 
 #include "ov2slam.hpp"
 #include "slam_params.hpp"
 #include "rerun_visualizer.hpp"
 #include "gt_loader.hpp"
+#include "../async_image_loader_parallel.hpp"
 
 // Use stub ros_visualizer instead of real ROS
 #define USE_STUB_VISUALIZER
@@ -53,9 +56,10 @@ std::vector<std::pair<double, std::string>> readTimestamps(const std::string& fi
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cout << "\n===== OV2SLAM =====\n";
-        std::cout << "Usage: " << argv[0] << " <parameters_file.yaml> <dataset_path>\n";
+        std::cout << "Usage: " << argv[0] << " <parameters_file.yaml> <dataset_path> [start_frame] [end_frame]\n";
         std::cout << "\nExample:\n";
         std::cout << "  " << argv[0] << " parameters_files/pohang00.yaml ~/datasets/pohang00\n";
+        std::cout << "  " << argv[0] << " parameters_files/pohang00.yaml ~/datasets/pohang00 240 280\n";
         std::cout << "\nOutput files:\n";
         std::cout << "  - ov2slam_trajectory.txt (VO trajectory)\n";
         std::cout << "  - ov2slam_keyframes.txt (keyframe poses)\n";
@@ -65,6 +69,17 @@ int main(int argc, char** argv) {
 
     std::string parameters_file = argv[1];
     std::string dataset_path = argv[2];
+
+    // Parse optional frame range arguments
+    int start_frame = 0;
+    int end_frame = INT_MAX;
+    if (argc >= 4) {
+        start_frame = std::stoi(argv[3]);
+        if (argc >= 5) {
+            end_frame = std::stoi(argv[4]);
+        }
+        std::cout << "Frame range: " << start_frame << " to " << end_frame << std::endl;
+    }
 
     std::cout << "\n========================================\n";
     std::cout << "     OV2SLAM\n";
@@ -154,30 +169,85 @@ int main(int argc, char** argv) {
     std::string left_dir = dataset_path + "/stereo/left_images/";
     std::string right_dir = dataset_path + "/stereo/right_images/";
 
-    // Process images
+    // Process images with async I/O (prefetch for speedup)
     std::cout << "\nProcessing " << timestamps.size() << " image pairs..." << std::endl;
+    std::cout << "Using PARALLEL async I/O with 16-frame prefetch (12-thread PNG decode: 6L + 6R)" << std::endl;
     std::cout << "Press Ctrl+C to stop early\n" << std::endl;
 
     auto start_time = std::chrono::steady_clock::now();
 
-    for (size_t i = 0; i < timestamps.size(); i++) {
-        double ts = timestamps[i].first;
-        std::string img_name = timestamps[i].second;
+    // Apply frame range
+    size_t start_idx = (start_frame > 0) ? start_frame : 0;
+    size_t end_idx = (end_frame < (int)timestamps.size()) ? end_frame : timestamps.size();
 
-        // Load images
-        std::string left_path = left_dir + img_name + ".png";
-        std::string right_path = right_dir + img_name + ".png";
+    // Create async loader with 16-frame prefetch (12-thread parallel decode: 6L + 6R)
+    AsyncImageLoaderParallel loader(left_dir, right_dir, 16, 6, 6);
 
-        cv::Mat left_img = cv::imread(left_path, cv::IMREAD_GRAYSCALE);
-        cv::Mat right_img = cv::imread(right_path, cv::IMREAD_GRAYSCALE);
+    // CRITICAL: Set start index to match frame range (prevents deadlock)
+    if (start_idx > 0) {
+        loader.setStartIndex(start_idx);
+    }
 
-        if (left_img.empty() || right_img.empty()) {
-            std::cerr << "Failed to read image pair: " << img_name << std::endl;
-            continue;
+    // Prime the pump: add first 16 frames to load queue
+    size_t prefetch_count = std::min((size_t)16, end_idx - start_idx);
+    for (size_t i = 0; i < prefetch_count; i++) {
+        double ts = timestamps[start_idx + i].first;
+        std::string img_name = timestamps[start_idx + i].second;
+        loader.addFrame(ts, img_name, start_idx + i);
+    }
+
+    // Process frames with async loading
+    size_t next_to_queue = start_idx + prefetch_count;
+
+    // Timing accumulators
+    double total_io_us = 0.0;
+    double total_slam_us = 0.0;
+    double total_wait_us = 0.0;
+
+    for (size_t i = start_idx; i < end_idx; i++) {
+        AsyncImageLoaderParallel::ImagePair img_pair;
+
+        // Get next loaded frame (blocks if not ready, but should be ready due to prefetch)
+        if (!loader.getNext(img_pair)) {
+            break;  // End of queue or error
         }
 
-        // Add to SLAM
-        slam.addNewStereoImages(ts, left_img, right_img);
+        // Log I/O timing
+        total_io_us += img_pair.load_us;
+        total_wait_us += img_pair.wait_us;
+
+        // Queue up MULTIPLE frames in background to maintain prefetch buffer
+        // (not just 1 frame - that causes wait time)
+        while (next_to_queue < end_idx && (next_to_queue - i) < 8) {
+            double ts = timestamps[next_to_queue].first;
+            std::string img_name = timestamps[next_to_queue].second;
+            loader.addFrame(ts, img_name, next_to_queue);
+            next_to_queue++;
+        }
+
+        // Add to SLAM with timing
+        auto slam_start = std::chrono::high_resolution_clock::now();
+        slam.addNewStereoImages(img_pair.timestamp, img_pair.left, img_pair.right);
+        auto slam_end = std::chrono::high_resolution_clock::now();
+
+        double slam_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            slam_end - slam_start).count();
+        total_slam_us += slam_us;
+
+        // Print timing breakdown every 10 frames
+        if ((i + 1) % 10 == 0 || i == end_idx - 1) {
+            double avg_io = total_io_us / (i - start_idx + 1);
+            double avg_slam = total_slam_us / (i - start_idx + 1);
+            double avg_wait = total_wait_us / (i - start_idx + 1);
+            double avg_total = avg_io + avg_slam + avg_wait;
+
+            std::cout << "Frame " << (i + 1) << " timings: "
+                      << "I/O=" << std::fixed << std::setprecision(2) << (avg_io/1000.0) << "ms, "
+                      << "SLAM=" << (avg_slam/1000.0) << "ms, "
+                      << "Wait=" << (avg_wait/1000.0) << "ms, "
+                      << "Total=" << (avg_total/1000.0) << "ms "
+                      << "(" << std::fixed << std::setprecision(1) << (1000.0/avg_total) << " fps)" << std::endl;
+        }
 
         if ((i + 1) % 100 == 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -185,6 +255,29 @@ int main(int argc, char** argv) {
             std::cout << "Processed " << (i + 1) << "/" << timestamps.size()
                      << " images (elapsed: " << elapsed << "s)" << std::endl;
         }
+        // Progress update for frame range
+        if (start_frame > 0 || end_frame < INT_MAX) {
+            if ((i + 1) % 10 == 0 || i == end_idx - 1) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - start_time).count();
+                // std::cout << "Processed frame " << (i + 1) << " (range: " << start_idx
+                //          << "-" << end_idx << ", elapsed: " << elapsed << "s)" << std::endl;
+            }
+        }
+    }
+
+    // Print final timing summary
+    std::cout << "\n=== Timing Summary ===" << std::endl;
+    std::cout << "Total frames: " << (end_idx - start_idx) << std::endl;
+    std::cout << "Avg I/O (PNG decode):    " << (total_io_us / (end_idx - start_idx) / 1000.0) << " ms/frame" << std::endl;
+    std::cout << "Avg SLAM processing:     " << (total_slam_us / (end_idx - start_idx) / 1000.0) << " ms/frame" << std::endl;
+    std::cout << "Avg wait (prefetch):     " << (total_wait_us / (end_idx - start_idx) / 1000.0) << " ms/frame" << std::endl;
+    std::cout << "Total per frame:         " << ((total_io_us + total_slam_us + total_wait_us) / (end_idx - start_idx) / 1000.0) << " ms/frame" << std::endl;
+    std::cout << "Bottleneck: ";
+    if (total_io_us > total_slam_us) {
+        std::cout << "I/O (" << (100.0 * total_io_us / (total_io_us + total_slam_us)) << "%)" << std::endl;
+    } else {
+        std::cout << "SLAM (" << (100.0 * total_slam_us / (total_io_us + total_slam_us)) << "%)" << std::endl;
     }
 
     auto total_time = std::chrono::duration_cast<std::chrono::seconds>(

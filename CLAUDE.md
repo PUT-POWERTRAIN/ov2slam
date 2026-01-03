@@ -152,3 +152,145 @@ Generated in working directory:
 
 Remeber to use subagents and tools, use Write when you want to add somehting to file(don't use echo), use Read when you want to read from file(don't use sed).
 When running long running commands you can use background Command/Task.
+
+## Docker Development Environment
+
+This project includes a Docker Compose setup for isolated development with Claude Code CLI and all OV2SLAM dependencies.
+
+### Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose v2.0+
+- z.ai API account (or any Anthropic-compatible API)
+
+### Quick Start
+
+1. **Configure environment variables**
+   ```bash
+   # Copy the example env file
+   cp .env.example .env
+
+   # Edit .env and add your z.ai credentials
+   nano .env
+   ```
+
+   Required variables in `.env`:
+   ```bash
+   ANTHROPIC_AUTH_TOKEN=your_z_ai_token_here
+   ANTHROPIC_BASE_URL=https://z.ai
+   ```
+
+2. **Build the Docker image**
+   ```bash
+   docker-compose build
+   ```
+
+3. **Run the container**
+   ```bash
+   # Interactive shell
+   docker-compose run --rm ov2slam-dev
+
+   # Or with bash directly
+   docker-compose run --rm ov2slam-dev bash
+   ```
+
+4. **Build OV2SLAM inside container**
+   ```bash
+   ./build.sh
+   ```
+
+### What's Included
+
+The Docker container includes:
+- **Claude Code CLI** (`@anthropic-ai/claude-code`)
+- **Build tools**: CMake, Ninja, gcc, g++
+- **OV2SLAM dependencies**:
+  - OpenCV 4.x with contrib modules
+  - Eigen3
+  - Ceres Solver dependencies
+  - GeographicLib
+  - Google logging, gflags, ATLAS, SuiteSparse
+- **Python 3** with pip
+- **Git** and other basic utilities
+
+### Volume Mounts
+
+- `.:/workspace` - Project source code (read-write)
+- `~/datasets:/datasets:ro` - Dataset directory (read-only)
+- `~/.claude:/home/developer/.claude:ro` - Global Claude config (read-only)
+
+### Customization
+
+**Change dataset location:**
+```bash
+# In .env
+DATASET_DIR=/path/to/your/datasets
+```
+
+**Match host user permissions:**
+```bash
+# Get your UID/GID
+id -u
+id -g
+
+# In .env
+USER_UID=1000
+USER_GID=1000
+```
+
+### Common Commands
+
+```bash
+# Build container
+docker-compose build
+
+# Rebuild without cache
+docker-compose build --no-cache
+
+# Run with custom command
+docker-compose run --rm ov2slam-dev ./build/ov2slam --help
+
+# Clean up
+docker-compose down
+docker system prune -a  # Remove all unused images
+```
+
+### Troubleshooting
+
+**Permission denied on files:**
+```bash
+# Ensure USER_UID/USER_GID in .env match your host user
+id -u
+id -g
+```
+
+**Claude Code can't authenticate:**
+```bash
+# Check environment variables are set in .env
+docker-compose run --rm ov2slam-dev env | grep ANTHROPIC
+
+# Verify z.ai credentials are correct
+```
+
+**Dataset not found:**
+```bash
+# Check dataset mount
+docker-compose run --rm ov2slam-dev ls -la /datasets
+```
+
+### GPU Support (Future)
+
+To enable GPU access, add to `docker-compose.yml`:
+```yaml
+services:
+  ov2slam-dev:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+Requires NVIDIA Container Toolkit on host.

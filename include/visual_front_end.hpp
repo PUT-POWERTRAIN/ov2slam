@@ -136,8 +136,11 @@ public:
     cv::Mat cur_img_, prev_img_;
     std::vector<cv::Mat> cur_pyr_, prev_pyr_;
     std::vector<cv::Mat> kf_pyr_;
-    
+
     MotionModel motion_model_;
 
-    bool bp3preq_ = false; 
+    bool bp3preq_ = false;
+
+    // For scientific logging: track global frame ID offset
+    int global_frame_id_offset_ = 0;
 };

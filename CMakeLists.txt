@@ -301,3 +301,11 @@ if(ENABLE_TESTS)
 
     message(STATUS "Tests enabled")
 endif()
+
+# GT extractor (for extracting ground truth trajectory)
+if(ENABLE_GPS_TESTS)
+    add_executable(gt_extractor
+        test/gt_extractor.cpp
+    )
+    target_link_libraries(gt_extractor ${PROJECT_NAME}_lib ${GeographicLib_LIBRARIES})
+endif()

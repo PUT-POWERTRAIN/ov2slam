@@ -463,7 +463,7 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
         options.use_nonmonotonic_steps = true;
     }
 
-    options.num_threads = 8;
+    options.num_threads = 12;
 
     options.max_num_iterations = 5;
     options.function_tolerance = 1.e-3;
@@ -1306,7 +1306,7 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
         options.use_nonmonotonic_steps = true;
     }
 
-    options.num_threads = 8;
+    options.num_threads = 12;
     options.max_num_iterations = 5;
     options.function_tolerance = 1.e-4;
     
@@ -2067,7 +2067,7 @@ void Optimizer::fullBA(const bool buse_robust_cost)
         options.use_nonmonotonic_steps = true;
     }
 
-    options.num_threads = 8;
+    options.num_threads = 12;
     options.max_num_iterations = 100;
 
     options.minimizer_progress_to_stdout = pslamstate_->debug_;
@@ -2768,7 +2768,7 @@ void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids)
         options.linear_solver_type = ceres::DENSE_SCHUR;
         options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
 
-        options.num_threads = 8;
+        options.num_threads = 12;
 
         options.max_num_iterations = 10;
         options.function_tolerance = 1.e-3;

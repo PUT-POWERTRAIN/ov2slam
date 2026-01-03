@@ -37,3 +37,6 @@ tmp/
 
 # Old async loader (superseded by parallel version)
 include/async_image_loader.hpp
+
+# Docker environment variables
+.env

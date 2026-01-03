@@ -88,6 +88,11 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     Sophus::SE3d Twc = pcurframe_->getTwc();
     motion_model_.applyMotionModel(Twc, time);
     pcurframe_->setTwc(Twc);
+
+    // SCI-LOG-1: Motion model prediction (all frames for debugging)
+    std::cout << "[POSE_PRED] frame=" << pcurframe_->id_
+              << " Z=" << Twc.translation().z()
+              << " nb_3d=" << pcurframe_->nb3dkps_ << std::endl;
     
     // Track the new image
     if( pslamstate_->btrack_keyframetoframe_ ) {
@@ -124,8 +129,17 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     // Update Motion model from estimated pose
     motion_model_.updateMotionModel(pcurframe_->Twc_, time);
 
+    // SCI-LOG-2: After PnP (all frames for debugging)
+    std::cout << "[POSE_PNP] frame=" << pcurframe_->id_
+              << " Z=" << pcurframe_->getTwc().translation().z()
+              << " nb_3d=" << pcurframe_->nb3dkps_ << std::endl;
+
     // Check if New KF req.
     bool is_kf_req = checkNewKfReq();
+
+    // SCI-LOG-3: Keyframe decision (all frames for debugging)
+    std::cout << "[KF_DEC] frame=" << pcurframe_->id_
+              << " is_kf=" << is_kf_req << std::endl;
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "1.FE_Track-Mono");
@@ -819,6 +833,13 @@ void VisualFrontEnd::computePose()
 
     if( pslamstate_->debug_ )
         std::cout << "\n \t>>> Ceres PnP nb outliers : " << voutliersidx.size();
+
+    // SCI-LOG-4: PnP solver results (all frames for debugging)
+    std::cout << "[PNP_RESULT] frame=" << pcurframe_->id_
+              << " Z=" << Twc.translation().z()
+              << " inliers=" << nbinliers
+              << " outliers=" << voutliersidx.size()
+              << " success=" << success << std::endl;
 
     if( !success
         || nbinliers < 5

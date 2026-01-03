@@ -69,6 +69,15 @@ void Mapper::run()
             std::shared_ptr<Frame> pnewkf = pmap_->getKeyframe(kf.kfid_);
             assert( pnewkf );
 
+            // Log keyframe for debugging
+            std::cout << "[KEYFRAME] id=" << pnewkf->id_
+                      << " kfid=" << pnewkf->kfid_
+                      << " Z=" << pnewkf->getTwc().translation().z()
+                      << " nb_3d=" << pnewkf->getKeypoints3d().size()
+                      << " nb_3dkps=" << pnewkf->nb3dkps_
+                      << " nb_2dkps=" << pnewkf->nb2dkps_
+                      << " nb_kps=" << pnewkf->nbkps_ << std::endl;
+
             // Triangulate stereo
             if( pslamstate_->stereo_ ) 
             {

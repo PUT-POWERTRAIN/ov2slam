@@ -519,6 +519,13 @@ bool MultiViewGeometry::ceresPnP(
 
     ceres::LocalParameterization *local_parameterization = new SE3LeftParameterization();
 
+    // SCI-LOG-5: Initial pose before PnP
+    // Note: Can't access frame_id here, so we log Z value to identify frames
+    if( Twc.translation().z() < -500.0 || Twc.translation().z() > 500.0 ) {
+        std::cout << "[PNP_INIT] Z_init=" << Twc.translation().z()
+                  << " nb_pts=" << vunkps.size() << std::endl;
+    }
+
     PoseParametersBlock posepar = PoseParametersBlock(0, Twc);
 
     problem.AddParameterBlock(posepar.values(), 7, local_parameterization);
@@ -546,7 +553,7 @@ bool MultiViewGeometry::ceresPnP(
     // options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
 
-    options.num_threads = 1;
+    options.num_threads = 4;
     options.max_num_iterations = nmaxiter;
     options.max_solver_time_in_seconds = 0.005;
     options.function_tolerance = 1.e-3;
@@ -561,10 +568,10 @@ bool MultiViewGeometry::ceresPnP(
     // std::cout << "\n Prev trans : " << twc.transpose();
     size_t nbbad = 0;
 
-    for( size_t i = 0 ; i < nbkps ; i++ ) 
+    for( size_t i = 0 ; i < nbkps ; i++ )
     {
         auto err = verrors_.at(i);
-        if( err->chi2err_ > chi2th || !err->isdepthpositive_ ) 
+        if( err->chi2err_ > chi2th || !err->isdepthpositive_ )
         {
             if( bapply_l2_after_robust ) {
                 auto rid = vrids_.at(i);
@@ -573,6 +580,15 @@ bool MultiViewGeometry::ceresPnP(
             voutliersidx.push_back(i);
             nbbad++;
         }
+    }
+
+    // SCI-LOG-6: Inlier/outlier summary
+    size_t nbinliers = nbkps - voutliersidx.size();
+    if( posepar.getPose().translation().z() < -500.0 || posepar.getPose().translation().z() > 500.0 ) {
+        std::cout << "[PNP_INLIERS] total=" << nbkps
+                  << " inliers=" << nbinliers
+                  << " outliers=" << voutliersidx.size()
+                  << " Z_final=" << posepar.getPose().translation().z() << std::endl;
     }
 
     if( nbbad == nbkps ) {

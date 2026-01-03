@@ -1,0 +1,252 @@
+#ifndef ASYNC_IMAGE_LOADER_PARALLEL_HPP
+#define ASYNC_IMAGE_LOADER_PARALLEL_HPP
+
+#include <string>
+#include <queue>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
+#include <opencv2/opencv.hpp>
+
+// Parallel async image loader with 2-thread decode
+// SIMPLIFIED: Each thread has its own dedicated work queue
+class AsyncImageLoaderParallel {
+public:
+    struct ImagePair {
+        double timestamp;
+        cv::Mat left;
+        cv::Mat right;
+        size_t frame_idx;
+        long load_us;
+        long wait_us;
+    };
+
+    AsyncImageLoaderParallel(const std::string& left_dir,
+                             const std::string& right_dir,
+                             size_t prefetch_size = 16)
+        : left_dir_(left_dir)
+        , right_dir_(right_dir)
+        , stop_requested_(false)
+    {
+        // Start worker threads
+        left_thread_ = std::thread(&AsyncImageLoaderParallel::leftWorker, this);
+        right_thread_ = std::thread(&AsyncImageLoaderParallel::rightWorker, this);
+    }
+
+    ~AsyncImageLoaderParallel() {
+        stop_requested_ = true;
+        cv_left_.notify_all();
+        cv_right_.notify_all();
+        if (left_thread_.joinable()) left_thread_.join();
+        if (right_thread_.joinable()) right_thread_.join();
+    }
+
+    void addFrame(double timestamp, const std::string& img_name, size_t idx) {
+        LoadTask task{timestamp, img_name, idx};
+
+        // Add to both queues
+        {
+            std::lock_guard<std::mutex> lock(mtx_left_);
+            left_queue_.push(task);
+        }
+        {
+            std::lock_guard<std::mutex> lock(mtx_right_);
+            right_queue_.push(task);
+        }
+
+        cv_left_.notify_one();
+        cv_right_.notify_one();
+    }
+
+    bool getNext(ImagePair& output) {
+        auto wait_start = std::chrono::high_resolution_clock::now();
+
+        std::unique_lock<std::mutex> lock(mtx_ready_);
+
+        // Wait for frame to be ready
+        cv_ready_.wait(lock, [this] {
+            return !ready_queue_.empty() || stop_requested_;
+        });
+
+        if (stop_requested_ && ready_queue_.empty()) return false;
+
+        output = ready_queue_.front();
+        ready_queue_.pop();
+
+        auto wait_end = std::chrono::high_resolution_clock::now();
+        output.wait_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            wait_end - wait_start).count();
+
+        return true;
+    }
+
+private:
+    struct LoadTask {
+        double timestamp;
+        std::string img_name;
+        size_t idx;
+    };
+
+    struct FramePair {
+        cv::Mat left;
+        cv::Mat right;
+        double timestamp;
+        size_t idx;
+        long left_load_us = 0;
+        long right_load_us = 0;
+        bool left_ready = false;
+        bool right_ready = false;
+    };
+
+    void leftWorker() {
+        while (!stop_requested_) {
+            LoadTask task;
+
+            {
+                std::unique_lock<std::mutex> lock(mtx_left_);
+                cv_left_.wait(lock, [this] {
+                    return !left_queue_.empty() || stop_requested_;
+                });
+
+                if (stop_requested_) break;
+                if (left_queue_.empty()) continue;
+
+                task = left_queue_.front();
+                left_queue_.pop();
+            }
+
+            // Get or create frame pair
+            FramePair* frame = nullptr;
+            {
+                std::unique_lock<std::mutex> lock(mtx_ready_);
+                if (frames_.find(task.idx) == frames_.end()) {
+                    frames_[task.idx].idx = task.idx;
+                    frames_[task.idx].timestamp = task.timestamp;
+                }
+                frame = &frames_[task.idx];
+            }
+
+            // Decode LEFT
+            auto t1 = std::chrono::high_resolution_clock::now();
+            std::string left_path = left_dir_ + task.img_name + ".png";
+            frame->left = cv::imread(left_path, cv::IMREAD_GRAYSCALE);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            frame->left_load_us = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+
+            if (frame->left.empty()) {
+                std::cerr << "Left failed: " << task.img_name << std::endl;
+                continue;
+            }
+
+            frame->left_ready = true;
+
+            // Check if complete
+            {
+                std::unique_lock<std::mutex> lock(mtx_ready_);
+                if (frame->right_ready) {
+                    // Both ready
+                    ImagePair pair;
+                    pair.timestamp = frame->timestamp;
+                    pair.left = frame->left;
+                    pair.right = frame->right;
+                    pair.frame_idx = frame->idx;
+                    pair.load_us = std::max(frame->left_load_us, frame->right_load_us);
+
+                    ready_queue_.push(pair);
+                    cv_ready_.notify_one();
+
+                    frames_.erase(task.idx);
+                }
+            }
+        }
+    }
+
+    void rightWorker() {
+        while (!stop_requested_) {
+            LoadTask task;
+
+            {
+                std::unique_lock<std::mutex> lock(mtx_right_);
+                cv_right_.wait(lock, [this] {
+                    return !right_queue_.empty() || stop_requested_;
+                });
+
+                if (stop_requested_) break;
+                if (right_queue_.empty()) continue;
+
+                task = right_queue_.front();
+                right_queue_.pop();
+            }
+
+            // Get or create frame pair
+            FramePair* frame = nullptr;
+            {
+                std::unique_lock<std::mutex> lock(mtx_ready_);
+                if (frames_.find(task.idx) == frames_.end()) {
+                    frames_[task.idx].idx = task.idx;
+                    frames_[task.idx].timestamp = task.timestamp;
+                }
+                frame = &frames_[task.idx];
+            }
+
+            // Decode RIGHT
+            auto t1 = std::chrono::high_resolution_clock::now();
+            std::string right_path = right_dir_ + task.img_name + ".png";
+            frame->right = cv::imread(right_path, cv::IMREAD_GRAYSCALE);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            frame->right_load_us = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+
+            if (frame->right.empty()) {
+                std::cerr << "Right failed: " << task.img_name << std::endl;
+                continue;
+            }
+
+            frame->right_ready = true;
+
+            // Check if complete
+            {
+                std::unique_lock<std::mutex> lock(mtx_ready_);
+                if (frame->left_ready) {
+                    // Both ready
+                    ImagePair pair;
+                    pair.timestamp = frame->timestamp;
+                    pair.left = frame->left;
+                    pair.right = frame->right;
+                    pair.frame_idx = frame->idx;
+                    pair.load_us = std::max(frame->left_load_us, frame->right_load_us);
+
+                    ready_queue_.push(pair);
+                    cv_ready_.notify_one();
+
+                    frames_.erase(task.idx);
+                }
+            }
+        }
+    }
+
+    std::string left_dir_, right_dir_;
+
+    // Left thread
+    std::thread left_thread_;
+    std::queue<LoadTask> left_queue_;
+    std::mutex mtx_left_;
+    std::condition_variable cv_left_;
+
+    // Right thread
+    std::thread right_thread_;
+    std::queue<LoadTask> right_queue_;
+    std::mutex mtx_right_;
+    std::condition_variable cv_right_;
+
+    // Shared data
+    std::map<size_t, FramePair> frames_;
+    std::mutex mtx_ready_;
+    std::condition_variable cv_ready_;
+
+    // Output queue
+    std::queue<ImagePair> ready_queue_;
+
+    bool stop_requested_;
+};
+
+#endif // ASYNC_IMAGE_LOADER_PARALLEL_HPP
