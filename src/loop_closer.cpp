@@ -69,6 +69,11 @@ void LoopCloser::run()
 #ifdef IBOW_LCD
     std::cout << "\n Use LoopCLoser : " << pslamstate_->buse_loop_closer_;
     if( !pslamstate_->buse_loop_closer_ ) {
+        std::cout << "\n LoopCloser disabled - waiting for shutdown\n";
+        while( !bexit_required_ ) {
+            std::chrono::microseconds dura(100);
+            std::this_thread::sleep_for(dura);
+        }
         return;
     }
 

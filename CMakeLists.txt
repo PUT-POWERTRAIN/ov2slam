@@ -60,12 +60,20 @@ add_definitions(-DCV_GRAY2RGB=cv::COLOR_GRAY2BGR)
 add_definitions(-DCV_RGB2GRAY=cv::COLOR_RGB2GRAY)
 
 # iBOW-LCD
-set(WITH_IBOW_LCD OFF)
+option(WITH_IBOW_LCD "Build with iBoW-LCD loop closure support" ON)
 if( EXISTS "${PROJECT_SOURCE_DIR}/Thirdparty/ibow_lcd/build/liblcdetector.so" )
-  add_definitions(-DIBOW_LCD)
-  set(WITH_IBOW_LCD ON)
-  message(STATUS "iBoW-LCD found! Going to use Loop Closer!")
+  if(WITH_IBOW_LCD)
+    add_definitions(-DIBOW_LCD)
+    message(STATUS "iBoW-LCD found! Going to use Loop Closer!")
+  else()
+    message(STATUS "iBoW-LCD found but disabled by user!")
+    set(WITH_IBOW_LCD OFF)
+  endif()
 else()
+  if(WITH_IBOW_LCD)
+    message(WARNING "iBoW-LCD requested but not found! Disabling...")
+  endif()
+  set(WITH_IBOW_LCD OFF)
   message(STATUS "iBoW-LCD NOT found! Loop Closer will not be enabled!")
 endif()
 
@@ -91,7 +99,9 @@ find_package(opengv QUIET)
 get_target_property(opengv_INCLUDE_DIR opengv INTERFACE_INCLUDE_DIRECTORIES)
 if (opengv_FOUND)
   message(STATUS "Found Opengv lib: ${opengv_INCLUDE_DIR} - ${opengv_DIR}")
-  add_definitions(-DUSE_OPENGV)
+  # DISABLED: OpenGV causes double-free crash in P3P RANSAC
+  # add_definitions(-DUSE_OPENGV)
+  message(STATUS "OpenGV DISABLED - using OpenCV fallback instead")
 endif()
 
 # Find Ceres
@@ -146,9 +156,10 @@ endif()
 
 if(GeographicLib_FOUND)
   message(STATUS "Found GeographicLib: ${GeographicLib_VERSION}")
-  add_definitions(-DENABLE_GPS_INIT)
+  # Note: GPS initialization now uses runtime checks (via GTLoader), not compile-time flags
+  # GeographicLib is only used for GPSConverter class (optional advanced features)
 else()
-  message(WARNING "GeographicLib not found - GPS initialization disabled")
+  message(STATUS "GeographicLib not found - GPS init will use GTLoader's built-in WGS84->ENU conversion")
 endif()
 
 # AHRS initialization (always available if GTLoader is built)
@@ -178,6 +189,7 @@ add_library(${PROJECT_NAME}_lib
   src/gt_loader.cpp
   src/gps_converter.cpp
   src/trajectory_evaluator.cpp
+  src/imu_preintegration.cpp
 )
 
 target_include_directories(${PROJECT_NAME}_lib

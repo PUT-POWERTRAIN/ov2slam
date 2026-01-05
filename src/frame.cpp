@@ -30,6 +30,7 @@
 
 Frame::Frame()
     : id_(-1), kfid_(0), img_time_(0.), nbkps_(0), nb2dkps_(0), nb3dkps_(0), nb_stereo_kps_(0),
+      velocity_(Eigen::Vector3d::Zero()), has_velocity_(false),
       Frl_(Eigen::Matrix3d::Zero()), Fcv_(cv::Mat::zeros(3,3,CV_64F))
 {}
 
@@ -37,6 +38,7 @@ Frame::Frame()
 Frame::Frame(std::shared_ptr<CameraCalibration> pcalib_left, const size_t ncellsize)
     : id_(-1), kfid_(0), img_time_(0.), ncellsize_(ncellsize), nbkps_(0),
       nb2dkps_(0), nb3dkps_(0), nb_stereo_kps_(0),
+      velocity_(Eigen::Vector3d::Zero()), has_velocity_(false),
       pcalib_leftcam_(pcalib_left)
 {
     PROFILE_FUNCTION();
@@ -53,7 +55,8 @@ Frame::Frame(std::shared_ptr<CameraCalibration> pcalib_left, const size_t ncells
 
 Frame::Frame(std::shared_ptr<CameraCalibration> pcalib_left, std::shared_ptr<CameraCalibration> pcalib_right, const size_t ncellsize)
     : id_(-1), kfid_(0), img_time_(0.), ncellsize_(ncellsize), nbkps_(0), nb2dkps_(0), nb3dkps_(0), nb_stereo_kps_(0),
-    pcalib_leftcam_(pcalib_left), pcalib_rightcam_(pcalib_right)
+      velocity_(Eigen::Vector3d::Zero()), has_velocity_(false),
+      pcalib_leftcam_(pcalib_left), pcalib_rightcam_(pcalib_right)
 {
     PROFILE_FUNCTION();
 
@@ -80,9 +83,11 @@ Frame::Frame(std::shared_ptr<CameraCalibration> pcalib_left, std::shared_ptr<Cam
 
 Frame::Frame(const Frame &F)
     : id_(F.id_), kfid_(F.kfid_), img_time_(F.img_time_), mapkps_(F.mapkps_), vgridkps_(F.vgridkps_), ngridcells_(F.ngridcells_), noccupcells_(F.noccupcells_),
-    ncellsize_(F.ncellsize_), nbwcells_(F.nbwcells_), nbhcells_(F.nbhcells_), nbkps_(F.nbkps_), nb2dkps_(F.nb2dkps_), nb3dkps_(F.nb3dkps_), 
-    nb_stereo_kps_(F.nb_stereo_kps_), Twc_(F.Twc_), Tcw_(F.Tcw_), pcalib_leftcam_(F.pcalib_leftcam_),
-    pcalib_rightcam_(F.pcalib_rightcam_), Frl_(F.Frl_), Fcv_(F.Fcv_), map_covkfs_(F.map_covkfs_), set_local_mapids_(F.set_local_mapids_)
+    ncellsize_(F.ncellsize_), nbwcells_(F.nbwcells_), nbhcells_(F.nbhcells_), nbkps_(F.nbkps_), nb2dkps_(F.nb2dkps_), nb3dkps_(F.nb3dkps_),
+    nb_stereo_kps_(F.nb_stereo_kps_), Twc_(F.Twc_), Tcw_(F.Tcw_),
+    velocity_(F.velocity_), has_velocity_(F.has_velocity_), imu_preint_(F.imu_preint_),
+    pcalib_leftcam_(F.pcalib_leftcam_), pcalib_rightcam_(F.pcalib_rightcam_),
+    Frl_(F.Frl_), Fcv_(F.Fcv_), map_covkfs_(F.map_covkfs_), set_local_mapids_(F.set_local_mapids_)
 {}
 
 // Set the image time and id
@@ -783,6 +788,26 @@ inline void Frame::setTcw(const Eigen::Matrix3d &Rcw, Eigen::Vector3d &tcw)
     Twc_ = Tcw_.inverse();
 }
 
+/************************************************************
+ * IMU Velocity State Accessors
+ ************************************************************/
+
+bool Frame::hasVelocity() const {
+    std::lock_guard<std::mutex> lock(velocity_mutex_);
+    return has_velocity_;
+}
+
+Eigen::Vector3d Frame::getVelocity() const {
+    std::lock_guard<std::mutex> lock(velocity_mutex_);
+    return velocity_;
+}
+
+void Frame::setVelocity(const Eigen::Vector3d& velocity) {
+    std::lock_guard<std::mutex> lock(velocity_mutex_);
+    velocity_ = velocity;
+    has_velocity_ = true;
+}
+
 cv::Point2f Frame::projCamToImage(const Eigen::Vector3d &pt) const
 {
     return pcalib_leftcam_->projectCamToImage(pt);
@@ -885,6 +910,14 @@ void Frame::reset()
 
     Twc_ = Sophus::SE3d();
     Tcw_ = Sophus::SE3d();
+
+    // Reset velocity state
+    {
+        std::lock_guard<std::mutex> lock3(velocity_mutex_);
+        velocity_ = Eigen::Vector3d::Zero();
+        has_velocity_ = false;
+        imu_preint_.reset();
+    }
 
     map_covkfs_.clear();
     set_local_mapids_.clear();

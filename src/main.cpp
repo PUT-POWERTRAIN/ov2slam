@@ -133,13 +133,18 @@ int main(int argc, char** argv) {
     std::cout << "Initializing SLAM system..." << std::endl;
     SlamManager slam(pparams, prosviz);
 
+    // Phase 3: Always pass GTLoader for IMU prediction (not just for init)
+    if( gt_loader ) {
+        slam.setGTLoader(gt_loader);
+        std::cout << "[GT] Ground truth loaded (IMU prediction enabled)" << std::endl;
+    }
+
 #if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
     if(gt_loader && (pparams->use_gps_init_ || pparams->use_ahrs_init_)) {
-        slam.setGTLoader(gt_loader);
         if(pparams->use_gps_init_)
-            std::cout << "GPS+AHRS initialization enabled" << std::endl;
+            std::cout << "[INIT] GPS+AHRS initialization enabled" << std::endl;
         else
-            std::cout << "AHRS-only initialization enabled" << std::endl;
+            std::cout << "[INIT] AHRS-only initialization enabled" << std::endl;
     }
 #endif
 

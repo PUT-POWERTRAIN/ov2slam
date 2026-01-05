@@ -56,13 +56,33 @@ RUN apt-get update && \
         && apt-get clean && \
         rm -rf /var/lib/apt/lists/*
 
+# Install additional OpenCV dependencies
+RUN apt-get update && \
+    apt-get install -y \
+        libgtk2.0-dev \
+        libavcodec-dev \
+        libavformat-dev \
+        libswscale-dev \
+        libtbbmalloc2 \
+        libtbb-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        && apt-get clean && \
+        rm -rf /var/lib/apt/lists/*
+
 # Install Ceres Solver dependencies and build Ceres
 RUN apt-get update && \
     apt-get install -y \
         libgoogle-glog-dev \
+        libgflags-dev \
         libgtest-dev \
         libsuitesparse-dev \
         libatlas-base-dev \
+        libboost-system-dev \
+        libboost-filesystem-dev \
+        libboost-python-dev \
+        tmux \
         && apt-get clean && \
         rm -rf /var/lib/apt/lists/*
 
@@ -71,20 +91,11 @@ RUN apt-get update && \
 RUN apt-get update && \
     apt-get install -y \
         libceres-dev \
-        libceres2 \
         && apt-get clean && \
         rm -rf /var/lib/apt/lists/*
 
-# Install Sophus (Lie groups) - build from source
-WORKDIR /tmp
-RUN git clone --depth 1 --branch 1.1.0 https://github.com/strasdat/Sophus.git && \
-    mkdir -p sophus/build && \
-    cd sophus/build && \
-    cmake .. && \
-    make -j$(nproc) && \
-    make install && \
-    cd / && \
-    rm -rf /tmp/sophus
+# NOTE: Sophus is NOT installed here
+# OV2SLAM uses its own copy from Thirdparty/Sophus which will be built with the project
 
 # Install OpenGV (optional but recommended)
 RUN apt-get update && \
@@ -113,6 +124,13 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 
 # === INSTALL CLAUDE CODE ===
 RUN npm install -g @anthropic-ai/claude-code
+
+# === INSTALL RERUN (3D Visualization) ===
+# Install latest rerun CLI for visualizing SLAM results
+RUN RERUN_VERSION=$(curl -s https://api.github.com/repos/rerun-io/rerun/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/') && \
+    curl -L https://github.com/rerun-io/rerun/releases/download/${RERUN_VERSION}/rerun-cli-${RERUN_VERSION}-x86_64-unknown-linux-gnu -o /usr/local/bin/rerun && \
+    chmod +x /usr/local/bin/rerun && \
+    /usr/local/bin/rerun --version
 
 # === USER SETUP ===
 ARG USER_ID=1000

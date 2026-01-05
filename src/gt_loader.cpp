@@ -145,6 +145,8 @@ bool GTLoader::loadFromAHRS(const std::string& ahrs_file) {
         AHRSPose ahrs_pose;
         ahrs_pose.timestamp = timestamp;
         ahrs_pose.orientation = q;
+        ahrs_pose.angular_velocity = Eigen::Vector3d(wx, wy, wz);
+        ahrs_pose.linear_acceleration = Eigen::Vector3d(ax, ay, az);
         ahrs_poses_.push_back(ahrs_pose);
         ahrs_timestamp_map_[timestamp] = ahrs_poses_.size() - 1;
 
@@ -167,6 +169,10 @@ bool GTLoader::loadFromAHRS(const std::string& ahrs_file) {
     }
 
     std::cout << "[GTLoader] Merged AHRS orientation data" << std::endl;
+
+    // Build timestamp index for efficient IMU queries
+    buildTimestampIndex();
+
     return true;
 }
 
@@ -237,4 +243,84 @@ bool GTLoader::getOrientationOnlyAt(double timestamp, Eigen::Quaterniond& orient
         return true;
     }
     return false;
+}
+
+void GTLoader::buildTimestampIndex() {
+    // Clear existing index
+    timestamp_index_.clear();
+
+    // Build timestamp -> index mapping for O(log N) queries
+    for (size_t i = 0; i < ahrs_poses_.size(); ++i) {
+        timestamp_index_[ahrs_poses_[i].timestamp] = i;
+    }
+
+    std::cout << "[GTLoader] Built timestamp index with " << timestamp_index_.size()
+              << " entries for efficient IMU queries" << std::endl;
+}
+
+std::vector<GTLoader::AHRSPose> GTLoader::getIMUData(double t_start, double t_end) {
+    std::vector<GTLoader::AHRSPose> measurements;
+
+    // Handle invalid range
+    if (t_start > t_end) {
+        std::cerr << "[GTLoader] Invalid timestamp range: t_start=" << t_start
+                  << " > t_end=" << t_end << std::endl;
+        return measurements;
+    }
+
+    // Handle empty data
+    if (timestamp_index_.empty()) {
+        std::cerr << "[GTLoader] No IMU data available (empty timestamp index)" << std::endl;
+        return measurements;
+    }
+
+    // Find first measurement >= t_start
+    auto it_start = timestamp_index_.lower_bound(t_start);
+
+    // Find first measurement > t_end (upper_bound gives one past the end)
+    auto it_end = timestamp_index_.upper_bound(t_end);
+
+    // Collect measurements in range [t_start, t_end]
+    for (auto it = it_start; it != it_end; ++it) {
+        size_t idx = it->second;
+        if (idx < ahrs_poses_.size()) {
+            measurements.push_back(ahrs_poses_[idx]);
+        }
+    }
+
+    return measurements;
+}
+
+GTLoader::AHRSPose GTLoader::getIMUAt(double timestamp) {
+    // Handle empty data
+    if (timestamp_index_.empty()) {
+        std::cerr << "[GTLoader] No IMU data available (empty timestamp index)" << std::endl;
+        return GTLoader::AHRSPose();  // Return default-constructed pose
+    }
+
+    // Find first measurement >= timestamp
+    auto it = timestamp_index_.lower_bound(timestamp);
+
+    // If we found an exact match or the next closest
+    if (it != timestamp_index_.end()) {
+        size_t idx = it->second;
+        if (idx < ahrs_poses_.size()) {
+            return ahrs_poses_[idx];
+        }
+    }
+
+    // If timestamp is beyond the last measurement, return the last one
+    if (!timestamp_index_.empty()) {
+        auto last_it = timestamp_index_.rbegin();
+        size_t idx = last_it->second;
+        if (idx < ahrs_poses_.size()) {
+            std::cout << "[GTLoader] Warning: timestamp " << timestamp
+                      << " is beyond data range, returning last measurement" << std::endl;
+            return ahrs_poses_[idx];
+        }
+    }
+
+    // Fallback: return default-constructed pose
+    std::cerr << "[GTLoader] Error: Cannot find IMU data for timestamp " << timestamp << std::endl;
+    return GTLoader::AHRSPose();
 }

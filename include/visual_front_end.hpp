@@ -34,6 +34,8 @@
 #include "slam_params.hpp"
 #include "map_manager.hpp"
 #include "feature_tracker.hpp"
+#include "gt_loader.hpp"
+#include "imu_preintegration.hpp"
 
 class MotionModel {
 
@@ -65,7 +67,7 @@ public:
             double dt = time - prev_time_;
 
             prev_time_ = time;
-            
+
             if( dt < 0. ) {
                 std::cerr << "\nGot image older than previous image! LEAVING!\n";
                 exit(-1);
@@ -77,16 +79,28 @@ public:
         }
     }
 
+    // Update velocity after pose computation (Phase 3: IMU)
+    void updateMotionModelVelocity(const Eigen::Vector3d& velocity, bool has_velocity) {
+        prev_velocity_ = velocity;
+        has_prev_velocity_ = has_velocity;
+    }
+
     void reset() {
         prev_time_ = -1.;
         log_relT_ = Eigen::Matrix<double, 6, 1>::Zero();
+        prev_velocity_ = Eigen::Vector3d::Zero();
+        has_prev_velocity_ = false;
     }
-    
+
 
     double prev_time_ = -1.;
 
     Sophus::SE3d prevTwc_;
     Eigen::Matrix<double, 6, 1> log_relT_ = Eigen::Matrix<double, 6, 1>::Zero();
+
+    // Phase 3: IMU velocity state
+    Eigen::Vector3d prev_velocity_ = Eigen::Vector3d::Zero();
+    bool has_prev_velocity_ = false;
 };
 
 class VisualFrontEnd {
@@ -95,10 +109,14 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     VisualFrontEnd() {}
-    VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframerame, 
-        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker);
+    VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframerame,
+        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker,
+        std::shared_ptr<GTLoader> gt_loader = nullptr);
 
-    bool visualTracking(cv::Mat &iml, double time);
+    // Set GTLoader after construction (needed for IMU prediction)
+    void setGTLoader(std::shared_ptr<GTLoader> gt_loader) { gt_loader_ = gt_loader; }
+
+    bool visualTracking(cv::Mat &iml, cv::Mat &imr, double time);
 
     bool trackMono(cv::Mat &im, double time);
 
@@ -132,14 +150,22 @@ public:
 
     std::shared_ptr<FeatureTracker> ptracker_;
 
+    // GTLoader for IMU data access (Phase 3: IMU-based motion prior)
+    std::shared_ptr<GTLoader> gt_loader_;
+
     cv::Mat left_raw_img_;
     cv::Mat cur_img_, prev_img_;
+    cv::Mat right_img_;
     std::vector<cv::Mat> cur_pyr_, prev_pyr_;
+    std::vector<cv::Mat> right_pyr_;
     std::vector<cv::Mat> kf_pyr_;
 
     MotionModel motion_model_;
 
     bool bp3preq_ = false;
+
+    // Keyframe watchdog: track time of last keyframe (Faza 3)
+    double last_keyframe_time_ = -1.0;
 
     // For scientific logging: track global frame ID offset
     int global_frame_id_offset_ = 0;

@@ -29,6 +29,8 @@
 #include <queue>
 #include <vector>
 #include <unordered_set>
+#include <atomic>
+#include <thread>
 
 #include "map_manager.hpp"
 #include "multi_view_geometry.hpp"
@@ -91,6 +93,7 @@ public:
 
     Mapper() {}
     Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, std::shared_ptr<Frame> pframe);
+    ~Mapper();  // Phase 1.3: Added destructor for clean thread shutdown
 
     void run();
 
@@ -126,9 +129,10 @@ public:
 
     bool bnewkfavailable_ = false;
     bool bwaiting_for_lc_ = false;
-    bool bexit_required_ = false; 
+    std::atomic<bool> bexit_required_{false}; 
 
     std::queue<Keyframe> qkfs_;
 
     std::mutex qkf_mutex_;
+    std::thread mapper_thread_;  // Phase 1.3: Made thread joinable (was detached)
 };

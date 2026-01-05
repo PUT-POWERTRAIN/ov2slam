@@ -32,6 +32,8 @@
 
 #include <sophus/se3.hpp>
 
+#include "sync_profiler.hpp"
+
 struct SE3Pose {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -101,7 +103,12 @@ class Logger {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
+    // Static mutex for thread-safe logging
+    static ProfiledMutex logger_mutex_;
+
     static void addSE3Pose(const double time, const Sophus::SE3d &Twc, const bool iskf) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
+
         vse3pose_.push_back(SE3Pose(time, Twc));
         vfullse3pose_.push_back(SE3Pose(time, Twc));
 
@@ -129,10 +136,12 @@ public:
     }
 
     static void addKfSE3Pose(const double time, const Sophus::SE3d &Twc) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
         vse3kfpose_.emplace(time, SE3Pose(time, Twc));
     }
 
     static void writeTrajectory(const std::string &filename) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
 
         std::ofstream f;
 
@@ -160,6 +169,7 @@ public:
     }
 
     static void writeTrajectoryTartanAir(const std::string &filename) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
 
         std::ofstream f;
 
@@ -186,6 +196,7 @@ public:
     }
 
     static void writeTrajectoryKITTI(const std::string &filename) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
 
         std::ofstream f;
 
@@ -214,6 +225,7 @@ public:
     }
 
     static void writeKfsTrajectory(const std::string &filename) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
 
         std::ofstream f;
 
@@ -240,6 +252,7 @@ public:
     }
 
     static void writeKfsTrajectoryTartanAir(const std::string &filename) {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
 
         std::ofstream f;
 
@@ -272,6 +285,7 @@ public:
     }
 
     static void reset() {
+        std::lock_guard<ProfiledMutex> lock(logger_mutex_);
         vse3pose_.clear();
         vse3kfpose_.clear();
         for( auto &el : vfullse3pose_ ) {
@@ -296,3 +310,4 @@ inline std::vector<SE3Pose> Logger::vse3pose_, Logger::vfullse3pose_;
 inline std::map<double, SE3Pose>  Logger::vse3kfpose_;
 inline std::vector<KittiPose> Logger::vkittipose_;
 inline std::vector<FramePose> Logger::vframepose_;
+inline ProfiledMutex Logger::logger_mutex_{"Logger::logger_mutex_"};

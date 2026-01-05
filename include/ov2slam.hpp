@@ -96,7 +96,13 @@ public:
 #endif
 
 #if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
-    void setGTLoader(std::shared_ptr<GTLoader> gt_loader) { gt_loader_ = gt_loader; }
+    void setGTLoader(std::shared_ptr<GTLoader> gt_loader) {
+        gt_loader_ = gt_loader;
+        // Also update VisualFrontEnd's gt_loader for IMU prediction
+        if( pvisualfrontend_ ) {
+            pvisualfrontend_->setGTLoader(gt_loader);
+        }
+    }
 #endif
 
     int frame_id_ = -1;
@@ -135,16 +141,14 @@ public:
 
 #if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
     std::shared_ptr<GTLoader> gt_loader_;
+
+    bool bgps_init_done_ = false;
+    bool bgps_has_been_inited_ = false;  // Prevents re-init after reset
+    bool bahrs_init_done_ = false;
+    bool bahrs_has_been_inited_ = false;  // Prevents re-init after reset
 #endif
 
 #ifdef ENABLE_GPS_INIT
     std::unique_ptr<ov2slam::GPSConverter> gps_converter_;
-    bool bgps_init_done_ = false;
-    bool bgps_has_been_inited_ = false;  // Prevents re-init after reset
-#endif
-
-#if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
-    bool bahrs_init_done_ = false;
-    bool bahrs_has_been_inited_ = false;  // Prevents re-init after reset
 #endif
 };

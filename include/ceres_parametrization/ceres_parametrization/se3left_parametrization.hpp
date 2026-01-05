@@ -30,13 +30,14 @@
 #include <sophus/se3.hpp>
 
 #include <ceres/ceres.h>
+#include "ceres_compat.hpp"
 
 /*
     SE(3) Parametrization such as:
-    1. T + dT = Exp(dT) * T 
-    2. T o X = T^(-1) * X (i.e. T: cam -> world)  
+    1. T + dT = Exp(dT) * T
+    2. T o X = T^(-1) * X (i.e. T: cam -> world)
 */
-class SE3LeftParameterization : public ceres::LocalParameterization {
+class SE3LeftParameterization : public LocalParameterization {
 public:
     virtual bool Plus(const double* x,
                       const double* delta,

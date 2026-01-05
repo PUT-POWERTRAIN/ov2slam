@@ -28,27 +28,37 @@
 
 #include "visual_front_end.hpp"
 #include "multi_view_geometry.hpp"
+#include <Eigen/SVD>
 
 #include <opencv2/highgui.hpp>
 
 #include "sync_profiler.hpp"
 
 
-VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, 
-        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker)
-    : pslamstate_(pstate), pcurframe_(pframe), pmap_(pmap), ptracker_(ptracker)
+VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe,
+        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker,
+        std::shared_ptr<GTLoader> gt_loader)
+    : pslamstate_(pstate), pcurframe_(pframe), pmap_(pmap), ptracker_(ptracker),
+      gt_loader_(gt_loader)
 {}
 
-bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
+bool VisualFrontEnd::visualTracking(cv::Mat &iml, cv::Mat &imr, double time)
 {
     PROFILE_FUNCTION();
 
     ProfiledLockGuard lock(pmap_->map_mutex_);
-    
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("0.Full-Front_End");
 
-    bool iskfreq = trackMono(iml, time);
+    bool iskfreq;
+
+    // Route to stereo or mono tracking based on configuration
+    if( pslamstate_->stereo_ ) {
+        iskfreq = trackStereo(iml, imr, time);
+    } else {
+        iskfreq = trackMono(iml, time);
+    }
 
     if( iskfreq ) {
         pmap_->createKeyframe(cur_img_, iml);
@@ -80,14 +90,109 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     preprocessImage(im);
 
     // Create KF if 1st frame processed
-    if( pcurframe_->id_ == 0 ) {
-        return true;
+    if( motion_model_.prev_time_ < 0 ) {
+        // First frame - initialize velocity to zero
+        pcurframe_->setVelocity(Eigen::Vector3d::Zero());
+        std::cout << "[INIT] First frame (id=" << pcurframe_->id_ << "): velocity initialized to zero" << std::endl;
+        // NOTE: Don't return! Continue to tracking so motion model gets updated
     }
-    
+
     // Apply Motion model to predict cur Frame pose
+    // Phase 3: Try IMU-based prediction first, fallback to constant velocity
     Sophus::SE3d Twc = pcurframe_->getTwc();
-    motion_model_.applyMotionModel(Twc, time);
-    pcurframe_->setTwc(Twc);
+
+    // Only attempt IMU prediction if we have a previous frame with velocity
+    if( motion_model_.prev_time_ >= 0 && gt_loader_ && motion_model_.has_prev_velocity_ ) {
+        std::cout << "[DEBUG] frame=" << pcurframe_->id_
+                  << " gt_loader=" << (gt_loader_ != nullptr)
+                  << " has_vel=" << motion_model_.has_prev_velocity_
+                  << " prev_time=" << motion_model_.prev_time_ << std::endl;
+
+        // IMU-based prediction (Forster et al. 2016, Eq. 5-7)
+        double t_prev = motion_model_.prev_time_;
+        double t_cur = time;
+
+        // Get IMU measurements between frames
+        std::vector<GTLoader::AHRSPose> imu_data =
+            gt_loader_->getIMUData(t_prev, t_cur);
+
+        std::cout << "[IMU_ATTEMPT] frame=" << pcurframe_->id_
+                  << " nb_imu=" << imu_data.size() << std::endl;
+
+        if( !imu_data.empty() ) {
+            // Initialize preintegration (assuming zero bias for MVP)
+            ov2slam::IMUPreintegration::Bias bias;
+            ov2slam::IMUPreintegration preint(bias);
+
+            // Integrate all IMU measurements
+            for( size_t i = 0; i < imu_data.size(); ++i ) {
+                double dt = (i == imu_data.size() - 1) ?
+                           (t_cur - imu_data[i].timestamp) :
+                           (imu_data[i+1].timestamp - imu_data[i].timestamp);
+                preint.integrate(imu_data[i], dt);
+            }
+
+            // Get previous frame state
+            Eigen::Matrix3d R_prev = motion_model_.prevTwc_.rotationMatrix();
+            Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
+            Eigen::Vector3d v_prev = motion_model_.prev_velocity_;
+
+            // Get preintegrated measurements
+            double dt = preint.getDeltaT();
+            Eigen::Matrix3d dR = preint.getDeltaRotation();
+            Eigen::Vector3d dp = preint.getDeltaPosition();
+            Eigen::Vector3d dv = preint.getDeltaVelocity();
+
+            // Predict pose: R_pred = R_prev * dR, p_pred = p_prev + v_prev*dt + R_prev*dp
+            Eigen::Matrix3d R_pred = R_prev * dR;
+            Eigen::Vector3d p_pred = p_prev + v_prev * dt + R_prev * dp;
+
+            // Orthogonalize R_pred to avoid numerical errors
+            Eigen::JacobiSVD<Eigen::Matrix3d> svd(R_pred, Eigen::ComputeFullU | Eigen::ComputeFullV);
+            R_pred = svd.matrixU() * svd.matrixV().transpose();
+
+            // Velocity prediction: v_pred = v_prev + R_prev * dv
+            // NOTE: AHRS data has gravity already removed (proper acceleration)
+            // Forster et al. 2016 Eq. 32 assumes raw IMU, so we omit g*Δt term
+            Eigen::Vector3d v_pred = v_prev + R_prev * dv;
+
+            // Sanity check: reject unrealistic velocities (>50 m/s = 180 km/h)
+            double v_norm = v_pred.norm();
+            if( v_norm > 50.0 ) {
+                std::cerr << "[WARNING] Unrealistic velocity: " << v_norm << " m/s at frame " << pcurframe_->id_ << std::endl;
+                // Clamp to reasonable maximum
+                v_pred = (v_pred / v_norm) * 50.0;
+            }
+
+            // Set predicted pose and velocity
+            Twc = Sophus::SE3d(R_pred, p_pred);
+            pcurframe_->setTwc(Twc);
+            pcurframe_->setVelocity(v_pred);
+
+            if( pslamstate_->debug_ ) {
+                std::cout << "[IMU_PRED] frame=" << pcurframe_->id_
+                          << " dt=" << dt
+                          << " nb_imu=" << imu_data.size()
+                          << " Z_pred=" << p_pred.z()
+                          << " v_pred=" << v_pred.norm() << std::endl;
+            }
+        } else {
+            // No IMU data available - fallback to constant velocity
+            std::cout << "[FALLBACK] No IMU data - using constant velocity" << std::endl;
+            motion_model_.applyMotionModel(Twc, time);
+            pcurframe_->setTwc(Twc);
+        }
+    } else {
+        // First frame or no velocity/GTLoader - use constant velocity
+        if( motion_model_.prev_time_ >= 0 ) {
+            std::cout << "[FALLBACK] frame=" << pcurframe_->id_
+                      << " gt_loader=" << (gt_loader_ != nullptr)
+                      << " has_vel=" << motion_model_.has_prev_velocity_
+                      << " prev_time=" << motion_model_.prev_time_ << std::endl;
+        }
+        motion_model_.applyMotionModel(Twc, time);
+        pcurframe_->setTwc(Twc);
+    }
 
     // SCI-LOG-1: Motion model prediction (all frames for debugging)
     std::cout << "[POSE_PRED] frame=" << pcurframe_->id_
@@ -126,8 +231,40 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     // Compute Pose (2D-3D)
     computePose();
 
-    // Update Motion model from estimated pose
+    // CORRECT velocity from visual pose estimate (fixes IMU drift)
+    // WITHOUT THIS: velocity accumulates IMU bias errors and explodes to 50 m/s
+    // Must compute BEFORE updateMotionModel() which overwrites prev_time_
+    if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
+        Eigen::Vector3d p_cur = pcurframe_->getTwc().translation();
+        Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
+        double dt = time - motion_model_.prev_time_;
+        Eigen::Vector3d v_visual = (p_cur - p_prev) / dt;
+        pcurframe_->setVelocity(v_visual);
+
+        std::cout << "[VELOCITY_CORRECTION] frame=" << pcurframe_->id_
+                  << " v_visual=" << v_visual.transpose()
+                  << " dt=" << dt << " s" << std::endl;
+    } else {
+        std::cout << "[VELOCITY_CORRECTION] SKIP frame=" << pcurframe_->id_
+                  << " prev_time=" << motion_model_.prev_time_
+                  << " time=" << time << std::endl;
+    }
+
+    // Update Motion model from estimated pose (must be AFTER velocity correction!)
     motion_model_.updateMotionModel(pcurframe_->Twc_, time);
+
+    // Update velocity in motion model (Phase 3: IMU)
+    if( pcurframe_->hasVelocity() ) {
+        Eigen::Vector3d vel = pcurframe_->getVelocity();
+        motion_model_.updateMotionModelVelocity(vel, true);
+        std::cout << "[VELOCITY_UPDATE] frame=" << pcurframe_->id_
+                  << " vel=" << vel.transpose()
+                  << " has_vel=" << pcurframe_->hasVelocity() << std::endl;
+    } else {
+        motion_model_.updateMotionModelVelocity(Eigen::Vector3d::Zero(), false);
+        std::cout << "[VELOCITY_UPDATE] frame=" << pcurframe_->id_
+                  << " NO VELOCITY" << std::endl;
+    }
 
     // SCI-LOG-2: After PnP (all frames for debugging)
     std::cout << "[POSE_PNP] frame=" << pcurframe_->id_
@@ -143,6 +280,159 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "1.FE_Track-Mono");
+
+    return is_kf_req;
+}
+
+
+// Perform stereo tracking with left and right images
+bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
+{
+    PROFILE_FUNCTION();
+
+    if( pslamstate_->debug_ )
+        std::cout << "\n\n - [Visual-Front-End]: Track Stereo Image\n";
+
+    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
+        Profiler::Start("1.FE_Track-Stereo");
+
+    // 1. Preprocess left image (builds pyramid)
+    preprocessImage(iml);
+
+    // Store right image and build KLT pyramid for stereo matching
+    if( pslamstate_->use_clahe_ ) {
+        ptracker_->pclahe_->apply(imr, right_img_);
+    } else {
+        right_img_ = imr;
+    }
+
+    // Build right pyramid (needed for MapManager::stereoMatching() later)
+    if( pslamstate_->do_klt_ ) {
+        cv::buildOpticalFlowPyramid(right_img_, right_pyr_,
+            pslamstate_->klt_win_size_,
+            pslamstate_->nklt_pyr_lvl_);
+    }
+
+    // 2. Extract keypoints on first frame (when no features exist yet)
+    if( motion_model_.prev_time_ < 0 ) {
+        pmap_->extractKeypoints(cur_img_, cur_img_);
+    }
+
+    // 3. Temporal tracking (for frames after the first)
+    // Track features from previous frame to current frame (same as mono mode)
+    if( motion_model_.prev_time_ >= 0 ) {
+        if( pslamstate_->btrack_keyframetoframe_ ) {
+            kltTrackingFromKF();
+        } else {
+            kltTracking();
+        }
+    }
+
+    // Epipolar filtering - remove KLT outliers
+    if( pslamstate_->doepipolar_ ) {
+        epipolar2d2dFiltering();
+    }
+
+    // 4. Apply Motion Model (same as mono tracking)
+    if( motion_model_.prev_time_ < 0 ) {
+        // First frame - initialize velocity to zero
+        pcurframe_->setVelocity(Eigen::Vector3d::Zero());
+    }
+
+    Sophus::SE3d Twc = pcurframe_->getTwc();
+
+    // Try IMU-based prediction first, fallback to constant velocity
+    if( motion_model_.prev_time_ >= 0 && gt_loader_ && motion_model_.has_prev_velocity_ ) {
+        double t_prev = motion_model_.prev_time_;
+        double t_cur = time;
+
+        std::vector<GTLoader::AHRSPose> imu_data =
+            gt_loader_->getIMUData(t_prev, t_cur);
+
+        if( !imu_data.empty() ) {
+            ov2slam::IMUPreintegration::Bias bias;
+            ov2slam::IMUPreintegration preint(bias);
+
+            for( size_t i = 0; i < imu_data.size(); ++i ) {
+                double dt = (i == imu_data.size() - 1) ?
+                           (t_cur - imu_data[i].timestamp) :
+                           (imu_data[i+1].timestamp - imu_data[i].timestamp);
+                preint.integrate(imu_data[i], dt);
+            }
+
+            Eigen::Matrix3d R_prev = motion_model_.prevTwc_.rotationMatrix();
+            Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
+            Eigen::Vector3d v_prev = motion_model_.prev_velocity_;
+
+            double dt = preint.getDeltaT();
+            Eigen::Matrix3d dR = preint.getDeltaRotation();
+            Eigen::Vector3d dp = preint.getDeltaPosition();
+            Eigen::Vector3d dv = preint.getDeltaVelocity();
+
+            Eigen::Matrix3d R_pred = R_prev * dR;
+            Eigen::Vector3d p_pred = p_prev + v_prev * dt + R_prev * dp;
+
+            // Orthogonalize R_pred
+            Eigen::JacobiSVD<Eigen::Matrix3d> svd(R_pred, Eigen::ComputeFullU | Eigen::ComputeFullV);
+            R_pred = svd.matrixU() * svd.matrixV().transpose();
+
+            Eigen::Vector3d v_pred = v_prev + R_prev * dv;
+
+            // Sanity check: reject unrealistic velocities
+            double v_norm = v_pred.norm();
+            if( v_norm > 50.0 ) {
+                std::cerr << "[WARNING] Unrealistic velocity: " << v_norm << " m/s at frame " << pcurframe_->id_ << std::endl;
+                v_pred = (v_pred / v_norm) * 50.0;
+            }
+
+            Twc = Sophus::SE3d(R_pred, p_pred);
+            pcurframe_->setTwc(Twc);
+            pcurframe_->setVelocity(v_pred);
+
+            if( pslamstate_->debug_ ) {
+                std::cout << "[IMU_PRED] frame=" << pcurframe_->id_
+                          << " dt=" << dt
+                          << " nb_imu=" << imu_data.size()
+                          << " Z_pred=" << p_pred.z()
+                          << " v_pred=" << v_pred.norm() << std::endl;
+            }
+        } else {
+            motion_model_.applyMotionModel(Twc, time);
+            pcurframe_->setTwc(Twc);
+        }
+    } else {
+        motion_model_.applyMotionModel(Twc, time);
+        pcurframe_->setTwc(Twc);
+    }
+
+    // NOTE: Stereo matching happens in MapManager::stereoMatching() when keyframes are created
+    // This uses ZNCC (proper for stereo) instead of KLT (which is for temporal tracking)
+    // The mapper will automatically match left↔right features and triangulate 3D points
+
+    // 5. Compute Pose (PnP with stereo + temporal features)
+    computePose();
+
+    // 6. Velocity correction from visual pose estimate
+    if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
+        Eigen::Vector3d p_cur = pcurframe_->getTwc().translation();
+        Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
+        double dt = time - motion_model_.prev_time_;
+        Eigen::Vector3d v_visual = (p_cur - p_prev) / dt;
+        pcurframe_->setVelocity(v_visual);
+    }
+
+    // Update motion model from estimated pose (must be AFTER velocity correction)
+    motion_model_.updateMotionModel(pcurframe_->Twc_, time);
+
+    std::cout << "[trackStereo] Before checkNewKfReq() for frame " << pcurframe_->id_ << std::endl;
+
+    // 7. Keyframe decision (keyframe creation is handled in visualTracking())
+    bool is_kf_req = checkNewKfReq();
+
+    std::cout << "[trackStereo] After checkNewKfReq() for frame " << pcurframe_->id_ << " → is_kf_req=" << is_kf_req << std::endl;
+
+    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
+        Profiler::StopAndDisplay(pslamstate_->debug_, "1.FE_Track-Stereo");
 
     return is_kf_req;
 }
@@ -1020,13 +1310,35 @@ bool VisualFrontEnd::checkReadyForInit()
 
 bool VisualFrontEnd::checkNewKfReq()
 {
+    std::cout << "[ENTER] checkNewKfReq() for frame " << pcurframe_->id_ << std::endl;
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.FE_TM_checkNewKfReq");
+
+    // FORCE FIRST KEYFRAME: If map is empty, always create first keyframe
+    if( pmap_->map_pkfs_.empty() ) {
+        std::cout << "  [FIRST KF] Map is empty → Creating first keyframe!" << std::endl;
+        last_keyframe_time_ = pcurframe_->img_time_; // Faza 3: Initialize watchdog
+        return true;
+    }
+
+    // Faza 3: WATCHDOG - Anti-starvation (prevent excessive keyframe rate)
+    if( pslamstate_->stereo_ && last_keyframe_time_ > 0 ) {
+        double time_since_last_kf = pcurframe_->img_time_ - last_keyframe_time_;
+        if( time_since_last_kf < 1.0 ) {
+            if( pslamstate_->debug_ )
+                std::cout << "  [WATCHDOG] REJECTING keyframe - too soon since last KF: "
+                          << time_since_last_kf << "s < 1.0s" << std::endl;
+            return false;
+        }
+    }
 
     // Get prev. KF
     auto pkfit = pmap_->map_pkfs_.find(pcurframe_->kfid_);
 
     if( pkfit == pmap_->map_pkfs_.end() ) {
+        std::cout << "[checkNewKfReq] ERROR: Previous KF #" << pcurframe_->kfid_ << " not found in map!" << std::endl;
+        std::cout << "  map_pkfs_ size: " << pmap_->map_pkfs_.size() << std::endl;
         return false; // Should not happen
     }
     auto pkf = pkfit->second;
@@ -1040,57 +1352,80 @@ bool VisualFrontEnd::checkNewKfReq()
     // Id diff with last KF
     int nbimfromkf = pcurframe_->id_-pkf->id_;
 
+    if( pslamstate_->debug_ ) {
+        std::cout << "\n[KF-DEBUG] Frame " << pcurframe_->id_ << " vs KF #" << pkf->kfid_
+                  << " (id=" << pkf->id_ << "):" << std::endl;
+        std::cout << "  nbimfromkf=" << nbimfromkf << std::endl;
+        std::cout << "  nb3dkps_=" << pcurframe_->nb3dkps_ << " (prev KF: " << pkf->nb3dkps_ << ")" << std::endl;
+        std::cout << "  noccupcells_=" << pcurframe_->noccupcells_ << " vs 0.33*nbmaxkps_=" << (0.33 * pslamstate_->nbmaxkps_) << std::endl;
+    }
+
     if( pcurframe_->noccupcells_ < 0.33 * pslamstate_->nbmaxkps_
         && nbimfromkf >= 5
         && !pslamstate_->blocalba_is_on_ )
     {
+        if( pslamstate_->debug_ )
+            std::cout << "  [CONDITION 1] TRUE → Creating keyframe (low occupancy)" << std::endl;
+        last_keyframe_time_ = pcurframe_->img_time_; // Faza 3: Update watchdog
         return true;
     }
 
     if( pcurframe_->nb3dkps_ < 20 &&
         nbimfromkf >= 2 )
     {
+        if( pslamstate_->debug_ )
+            std::cout << "  [CONDITION 2] TRUE → Creating keyframe (low 3D keypoints)" << std::endl;
+        last_keyframe_time_ = pcurframe_->img_time_; // Faza 3: Update watchdog
         return true;
     }
 
-    if( pcurframe_->nb3dkps_ > 0.5 * pslamstate_->nbmaxkps_ 
+    if( pcurframe_->nb3dkps_ > 0.5 * pslamstate_->nbmaxkps_
         && (pslamstate_->blocalba_is_on_ || nbimfromkf < 2) )
     {
+        if( pslamstate_->debug_ )
+            std::cout << "  [CONDITION 3] FALSE → Rejecting keyframe (too many 3D keypoints)" << std::endl;
         return false;
     }
 
     // Time diff since last KF in sec.
     double time_diff = pcurframe_->img_time_ - pkf->img_time_;
 
-    if( pslamstate_->stereo_ && time_diff > 1. 
+    // Faza 3: Changed time threshold from 1.0s to 5.0s (less aggressive)
+    if( pslamstate_->stereo_ && time_diff > 5.0
         && !pslamstate_->blocalba_is_on_ )
     {
+        if( pslamstate_->debug_ )
+            std::cout << "  [CONDITION 4] TRUE → Creating keyframe (stereo time diff: " << time_diff << "s)" << std::endl;
+        last_keyframe_time_ = pcurframe_->img_time_; // Faza 3: Update watchdog
         return true;
     }
 
+    // Faza 3: Changed frame diff from 2 to 10 (less aggressive)
     bool cx = med_rot_parallax >= pslamstate_->finit_parallax_ / 2.
-        || (pslamstate_->stereo_ && !pslamstate_->blocalba_is_on_ && pcurframe_->id_-pkf->id_ > 2);
+        || (pslamstate_->stereo_ && !pslamstate_->blocalba_is_on_ && pcurframe_->id_-pkf->id_ > 10);
 
     bool c0 = med_rot_parallax >= pslamstate_->finit_parallax_;
     bool c1 = pcurframe_->nb3dkps_ < 0.75 * pkf->nb3dkps_;
     bool c2 = pcurframe_->noccupcells_ < 0.5 * pslamstate_->nbmaxkps_
                 && pcurframe_->nb3dkps_ < 0.85 * pkf->nb3dkps_
                 && !pslamstate_->blocalba_is_on_;
-    
+
     bool bkfreq = (c0 || c1 || c2) && cx;
 
-    if( bkfreq && pslamstate_->debug_ ) {
-        
-        std::cout << "\n\n----------------------------------------------------------------------";
-        std::cout << "\n>>> Check Keyframe conditions :";
-        std::cout << "\n> pcurframe_->id_ = " << pcurframe_->id_ << " / prev kf frame_id : " << pkf->id_;
-        std::cout << "\n> Prev KF nb 3d kps = " << pkf->nb3dkps_ << " / Cur Frame = " << pcurframe_->nb3dkps_;
-        std::cout << " / Cur Frame occup cells = " << pcurframe_->noccupcells_ << " / parallax = " << med_rot_parallax;
-        std::cout << "\n-------------------------------------------------------------------\n\n";
+    if( pslamstate_->debug_ ) {
+        std::cout << "  time_diff=" << time_diff << "s" << std::endl;
+        std::cout << "  med_rot_parallax=" << med_rot_parallax << " vs finit_parallax_/2=" << (pslamstate_->finit_parallax_ / 2.) << std::endl;
+        std::cout << "  cx=" << cx << ", c0=" << c0 << ", c1=" << c1 << ", c2=" << c2 << std::endl;
+        std::cout << "  bkfreq=" << bkfreq << " → " << (bkfreq ? "CREATING KEYFRAME" : "NOT creating keyframe") << std::endl;
     }
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_checkNewKfReq");
+
+    // Faza 3: Update watchdog timer when keyframe will be created
+    if( bkfreq ) {
+        last_keyframe_time_ = pcurframe_->img_time_;
+    }
 
     return bkfreq;
 }

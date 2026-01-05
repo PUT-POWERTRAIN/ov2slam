@@ -31,14 +31,14 @@
 
 #include "sync_profiler.hpp"
 
-Mapper::Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, 
+Mapper::Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap,
             std::shared_ptr<Frame> pframe)
     : pslamstate_(pslamstate), pmap_(pmap), pcurframe_(pframe)
     , pestimator_( new Estimator(pslamstate_, pmap_) )
     , ploopcloser_( new LoopCloser(pslamstate_, pmap_) )
 {
-    std::thread mapper_thread(&Mapper::run, this);
-    mapper_thread.detach();
+    // Phase 1.3: Assign thread to member (keep it joinable, no detach)
+    mapper_thread_ = std::thread(&Mapper::run, this);
 
     std::cout << "\nMapper Object is created!\n";
 }
@@ -180,6 +180,12 @@ void Mapper::run()
             // Send KF along with left image to LC thread
             if( pslamstate_->buse_loop_closer_ ) {
                 ploopcloser_->addNewKf(pnewkf, kf.imleftraw_);
+            }
+
+            // Faza 4: Release image memory to prevent leak (Keyframe struct clone)
+            kf.releaseImages();
+            if( pslamstate_->debug_ ) {
+                std::cout << "[Mapper] Released images for KF #" << kf.kfid_ << std::endl;
             }
 
             if( pslamstate_->debug_ || pslamstate_->log_timings_ )
@@ -845,8 +851,22 @@ void Mapper::reset()
 
     bnewkfavailable_ = false;
     bwaiting_for_lc_ = false;
-    bexit_required_ = false; 
+    bexit_required_ = false;
 
     std::queue<Keyframe> empty;
     std::swap(qkfs_, empty);
+}
+
+// Phase 1.3: Destructor for clean thread shutdown (fixes segfault)
+Mapper::~Mapper()
+{
+    // Signal the mapper thread to stop
+    bexit_required_ = true;
+
+    // Wait for mapper thread to finish (joins child threads internally)
+    if( mapper_thread_.joinable() ) {
+        mapper_thread_.join();
+    }
+
+    std::cout << "\nMapper destroyed cleanly!\n";
 }

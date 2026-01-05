@@ -105,9 +105,9 @@ SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Ros
     // Map Manager will handle Keyframes / MapPoints
     pmap_.reset( new MapManager(pslamstate_, pcurframe_, pfeatextract_, ptracker_) );
 
-    // Visual Front-End processes every incoming frames 
-    pvisualfrontend_.reset( new VisualFrontEnd(pslamstate_, pcurframe_, 
-                                    pmap_, ptracker_
+    // Visual Front-End processes every incoming frames
+    pvisualfrontend_.reset( new VisualFrontEnd(pslamstate_, pcurframe_,
+                                    pmap_, ptracker_, gt_loader_
                                 )
                             );
 
@@ -140,6 +140,7 @@ void SlamManager::run()
             pcurframe_->updateFrame(frame_id_, time);
 
 #if defined(ENABLE_GPS_INIT) || defined(ENABLE_AHRS_INIT)
+            // Debug removed - GPS init working
             // AHRS-only initialization (no GeographicLib required)
             // Only init if not already initialized (prevents re-init after reset)
             if( frame_id_ == 0 && pslamstate_->use_ahrs_init_ && !pslamstate_->use_gps_init_ && !bahrs_has_been_inited_ )
@@ -165,11 +166,13 @@ void SlamManager::run()
             }
 #endif
 
-#ifdef ENABLE_GPS_INIT
             // GPS+AHRS initialization for first frame (id=0)
-            // Only init if not already initialized (prevents re-init after reset)
-            if( frame_id_ == 0 && pslamstate_->use_gps_init_ && !bgps_has_been_inited_ )
+            // NOTE: This doesn't require GeographicLib, only GTLoader which handles WGS84->ENU conversion
+            if( pslamstate_->use_gps_init_ )
             {
+                if( frame_id_ == 0 && !bgps_has_been_inited_ )
+                {
+
                 if( !gt_loader_ ) {
                     std::cerr << "\n[FATAL] GPS init enabled but GTLoader not set! "
                              << "Did you forget to call slam.setGTLoader()?\n";
@@ -198,8 +201,8 @@ void SlamManager::run()
 
                 std::cout << "\n[GPS Init] Frame 0: pos=" << enu_position.transpose()
                          << " yaw=" << (ahrs_orientation.toRotationMatrix().eulerAngles(2,1,0)[0] * 180.0 / M_PI) << " deg\n";
+                }
             }
-#endif
 
             // Update cam delay for automatic exit
             if( frame_id_ > 0 ) {
@@ -218,7 +221,7 @@ void SlamManager::run()
             if( pslamstate_->debug_ )
                 std::cout << "\n \t >>> [SLAM Node] New image send to Front-End\n";
 
-            bool is_kf_req = pvisualfrontend_->visualTracking(img_left, time);
+            bool is_kf_req = pvisualfrontend_->visualTracking(img_left, img_right, time);
 
             // Save current pose
             Logger::addSE3Pose(time, pcurframe_->getTwc(), is_kf_req);

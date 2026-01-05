@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <map>
 
 /**
  * @brief Ground truth loader for GPS and AHRS data from Pohang Canal dataset
@@ -52,6 +53,19 @@
  */
 class GTLoader {
 public:
+    // Public struct for AHRS pose data (orientation + IMU measurements)
+    struct AHRSPose {
+        double timestamp;
+        Eigen::Quaterniond orientation;
+
+        // IMU measurements from AHRS
+        Eigen::Vector3d angular_velocity;   // wx, wy, wz [rad/s] in BODY frame
+        Eigen::Vector3d linear_acceleration; // ax, ay, az [m/s²] in BODY frame
+
+        AHRSPose() : angular_velocity(Eigen::Vector3d::Zero()),
+                    linear_acceleration(Eigen::Vector3d::Zero()) {}
+    };
+
     GTLoader();
 
     // Load ground truth from GPS/AHRS files
@@ -70,6 +84,13 @@ public:
     // Get origin (first point) - useful for coordinate conversion
     const Eigen::Vector3d& getOrigin() const { return origin_; }
 
+    // IMU query methods - efficient O(log N) timestamp-based queries
+    // Get IMU measurements between timestamps (inclusive range)
+    std::vector<AHRSPose> getIMUData(double t_start, double t_end);
+
+    // Get IMU measurement closest to timestamp (no interpolation)
+    AHRSPose getIMUAt(double timestamp);
+
 private:
     struct GTPose {
         double timestamp;
@@ -81,15 +102,11 @@ private:
         Eigen::Quaterniond orientation;  // From AHRS
     };
 
-    struct AHRSPose {
-        double timestamp;
-        Eigen::Quaterniond orientation;
-    };
-
     std::vector<GTPose> gt_poses_;
     std::unordered_map<double, size_t> timestamp_map_;
     std::vector<AHRSPose> ahrs_poses_;
     std::unordered_map<double, size_t> ahrs_timestamp_map_;
+    std::map<double, size_t> timestamp_index_;  // timestamp -> index in ahrs_poses_ for O(log N) queries
 
     std::vector<Eigen::Vector3d> positions_;  // Converted to local XYZ
     Eigen::Vector3d origin_;  // Origin in local XYZ
@@ -102,4 +119,7 @@ private:
     // Simple geodetic to local conversion (first point = origin)
     void convertToLocal();
     Eigen::Vector3d geodeticToLocal(double lat, double lon, double alt);
+
+    // Build timestamp index for efficient IMU queries
+    void buildTimestampIndex();
 };

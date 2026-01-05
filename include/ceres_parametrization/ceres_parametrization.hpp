@@ -32,3 +32,4 @@
 #include "ceres_parametrization/pointxyz_param_block.hpp"
 #include "ceres_parametrization/inverse_depth_param_block.hpp"
 #include "ceres_parametrization/se3left_parametrization.hpp"
+#include "ceres_parametrization/ceres_compat.hpp"

@@ -517,7 +517,7 @@ bool MultiViewGeometry::ceresPnP(
 
     size_t nbkps = vunkps.size();
 
-    ceres::LocalParameterization *local_parameterization = new SE3LeftParameterization();
+    ceres::Manifold *manifold = createManifold(new SE3LeftParameterization());
 
     // SCI-LOG-5: Initial pose before PnP
     // Note: Can't access frame_id here, so we log Z value to identify frames
@@ -528,7 +528,7 @@ bool MultiViewGeometry::ceresPnP(
 
     PoseParametersBlock posepar = PoseParametersBlock(0, Twc);
 
-    problem.AddParameterBlock(posepar.values(), 7, local_parameterization);
+    problem.AddParameterBlock(posepar.values(), 7, manifold);
 
     std::vector<DirectLeftSE3::ReprojectionErrorSE3*> verrors_;
     std::vector<ceres::ResidualBlockId> vrids_;

@@ -42,6 +42,7 @@
 #include <sophus/se3.hpp>
 
 #include "camera_calibration.hpp"
+#include "imu_preintegration.hpp"
 
 struct Keypoint {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -156,6 +157,11 @@ public:
     void setTwc(const Eigen::Matrix3d &Rwc, Eigen::Vector3d &twc);
     void setTcw(const Eigen::Matrix3d &Rcw, Eigen::Vector3d &tcw);
 
+    // IMU velocity state (WORLD frame) [m/s]
+    bool hasVelocity() const;
+    Eigen::Vector3d getVelocity() const;
+    void setVelocity(const Eigen::Vector3d& velocity);
+
     std::set<int> getCovisibleKfSet() const;
 
     std::map<int,int> getCovisibleKfMap() const;
@@ -212,6 +218,13 @@ public:
     // Pose (T cam -> world), (T world -> cam)
     Sophus::SE3d Twc_, Tcw_;
 
+    // IMU velocity state [m/s] in WORLD frame
+    Eigen::Vector3d velocity_;
+    bool has_velocity_;
+
+    // Preintegrated IMU measurements from previous keyframe
+    std::shared_ptr<ov2slam::IMUPreintegration> imu_preint_;
+
     /* TODO
     Set a vector of calib ptrs to handle any multicam system.
     Each calib ptr should contain an extrinsic parametrization with a common
@@ -233,5 +246,6 @@ public:
 
     // Mutex
     mutable std::mutex kps_mutex_, pose_mutex_;
+    mutable std::mutex velocity_mutex_;  // Protects velocity_ and has_velocity_
     mutable std::mutex grid_mutex_, cokfs_mutex_;
 };

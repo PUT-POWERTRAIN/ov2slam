@@ -32,6 +32,7 @@ services:
 
       # Pliki .claude.json - jeśli masz go w innej lokalizacji
       - ${CLAUDE_JSON_PATH:-${HOME}/.claude.json}:/home/${USER:-wojtess}/.claude.json
+      - ~/datasets:/home/${USER:-wojtess}/datasets:ro
 
     # Utrzymanie stdin open dla interaktywnej pracy
     stdin_open: true

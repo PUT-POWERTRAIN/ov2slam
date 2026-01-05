@@ -75,7 +75,7 @@ force_realtime: 1
 slam_mode: 1
 
 # Loop Closing mode
-buse_loop_closer: 1
+buse_loop_closer: 0
 
 # Stereo rectify or not
 bdo_stereo_rect: 0
@@ -85,7 +85,7 @@ alpha: 0.
 bdo_undist: 0
 
 # Init / KF px th.
-finit_parallax: 30.
+finit_parallax: 20.
 
 # Features Extractor
 use_shi_tomasi: 0
@@ -94,9 +94,9 @@ use_brief: 1
 use_singlescale_detector: 0
 
 # Min dist between kps (define the number of kps)
-# Grid cells: 32 columns × 17 rows = 544 cells
-# Computed as: ceil(2048/65) × ceil(1080/65) = 32 × 17
-nmaxdist: 65
+# Increased from 50 to 100 for higher resolution images (2048x1080)
+# Original 50 would give ~900 kps, 100 gives ~220 kps
+nmaxdist: 100
 
 # Features quality th.
 nfast_th: 10
