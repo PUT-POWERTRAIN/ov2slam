@@ -863,7 +863,7 @@ Mapper::~Mapper()
     // Signal the mapper thread to stop
     bexit_required_ = true;
 
-    // Wait for mapper thread to finish (joins child threads internally)
+    // Wait for mapper thread to finish (run() will join child threads before exiting)
     if( mapper_thread_.joinable() ) {
         mapper_thread_.join();
     }
