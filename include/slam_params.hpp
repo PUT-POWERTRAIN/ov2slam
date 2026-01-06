@@ -169,4 +169,8 @@ public:
     // GPS and AHRS initialization
     bool use_gps_init_ = false;
     bool use_ahrs_init_ = false;
+
+    // Loop closure validation parameters
+    double max_loop_closure_displacement_ = 100.0;  // Maximum allowed pose displacement (meters)
+    bool enable_loop_displacement_check_ = true;     // Enable/disable displacement validation
 };

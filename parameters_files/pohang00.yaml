@@ -167,3 +167,14 @@ GPSInit.use_gps_init: 1
 GPSInit.use_ahrs_init: 1
 GPSInit.gps_file: "navigation/gps.txt"
 GPSInit.ahrs_file: "navigation/ahrs.txt"
+
+#--------------------------------------------------------------------------------------------
+# Loop Closure Validation (Prevents extreme trajectory jumps like 95km errors)
+#--------------------------------------------------------------------------------------------
+# Maximum allowed pose displacement after loop closure optimization (in meters)
+# If ANY pose moves more than this distance, the loop closure is rejected
+LoopClosure.max_loop_closure_displacement: 100.0
+
+# Enable/disable the displacement validation check
+# Set to 0 to disable (not recommended - can cause extreme trajectory jumps)
+LoopClosure.enable_loop_displacement_check: 1

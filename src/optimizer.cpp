@@ -2459,6 +2459,12 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("2.LC_PoseGraph_Optimize");
 
+    // Backup original poses for validation before optimization
+    original_poses_.clear();
+    for( const auto& [id, pose_block] : map_id_posespar_ ) {
+        original_poses_[id] = pose_block.getPose();
+    }
+
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
@@ -2479,6 +2485,42 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
 
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_PoseGraph_Optimize");
+
+    // Validate pose displacement to prevent extreme trajectory jumps (e.g., 95km errors)
+    if( pslamstate_->enable_loop_displacement_check_ ) {
+        double max_displacement = 0.0;
+        double current_frame_displacement = 0.0;
+
+        for( const auto& [id, pose_block] : map_id_posespar_ ) {
+            Sophus::SE3d original_pose = original_poses_[id];
+            Sophus::SE3d optimized_pose = pose_block.getPose();
+            double displacement = (original_pose.translation() - optimized_pose.translation()).norm();
+
+            max_displacement = std::max(max_displacement, displacement);
+
+            // Track current frame displacement specifically
+            if( id == newframe.kfid_ ) {
+                current_frame_displacement = displacement;
+            }
+        }
+
+        if( max_displacement > pslamstate_->max_loop_closure_displacement_ ) {
+            std::cerr << "\n[Optimizer] WARNING: Loop closure REJECTED due to excessive displacement!\n";
+            std::cerr << "[Optimizer] Max displacement: " << max_displacement << "m (threshold: "
+                      << pslamstate_->max_loop_closure_displacement_ << "m)\n";
+            std::cerr << "[Optimizer] Current frame displacement: " << current_frame_displacement << "m\n";
+
+            // Rollback all poses to original values
+            for( auto& [id, pose_block] : map_id_posespar_ ) {
+                pose_block.setPose(original_poses_[id]);
+            }
+
+            return false;
+        } else if( pslamstate_->debug_ && max_displacement > 1.0 ) {
+            std::cout << "\n[Optimizer] Loop closure accepted with displacement: "
+                      << max_displacement << "m\n";
+        }
+    }
 
     auto newkfpose = map_id_posespar_.at(newframe.kfid_);
     Sophus::SE3d newoptTwc = newkfpose.getPose();

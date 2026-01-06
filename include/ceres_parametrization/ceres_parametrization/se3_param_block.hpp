@@ -61,14 +61,21 @@ public:
         return *this; 
     }  
 
-    Sophus::SE3d getPose() {
-        Eigen::Map<Eigen::Vector3d> t(values_);
-        Eigen::Map<Eigen::Quaterniond> q(values_+3);
+    Sophus::SE3d getPose() const {
+        Eigen::Map<const Eigen::Vector3d> t(values_);
+        Eigen::Map<const Eigen::Quaterniond> q(values_+3);
         return Sophus::SE3d(q,t);
     }
 
-    inline double* values() {  
-        return values_; 
+    void setPose(const Sophus::SE3d& T) {
+        Eigen::Map<Eigen::Vector3d> t(values_);
+        Eigen::Map<Eigen::Quaterniond> q(values_+3);
+        t = T.translation();
+        q = T.unit_quaternion();
+    }
+
+    inline double* values() {
+        return values_;
     }
 
     static const size_t ndim_ = 7;

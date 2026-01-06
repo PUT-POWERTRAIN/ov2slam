@@ -197,6 +197,24 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
     // GPS and AHRS initialization
     use_gps_init_ = static_cast<int>(fsSettings["GPSInit.use_gps_init"]);
     use_ahrs_init_ = static_cast<int>(fsSettings["GPSInit.use_ahrs_init"]);
+
+    // Loop closure validation parameters (with defaults for backward compatibility)
+    cv::FileNode node_disp = fsSettings["LoopClosure.max_loop_closure_displacement"];
+    if( !node_disp.empty() ) {
+        max_loop_closure_displacement_ = static_cast<double>(node_disp);
+        if( max_loop_closure_displacement_ <= 0.0 ) {
+            max_loop_closure_displacement_ = 100.0;  // Default value (meters)
+        }
+    } else {
+        max_loop_closure_displacement_ = 100.0;  // Default if not in YAML
+    }
+
+    cv::FileNode node_enable = fsSettings["LoopClosure.enable_loop_displacement_check"];
+    if( !node_enable.empty() ) {
+        enable_loop_displacement_check_ = static_cast<int>(node_enable);
+    } else {
+        enable_loop_displacement_check_ = true;  // Default if not in YAML
+    }
 }
 
 void SlamParams::reset() {

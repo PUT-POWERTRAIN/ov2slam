@@ -64,4 +64,7 @@ public:
     bool bstop_localba_;
 
     std::mutex localba_mutex_;
+
+    // Pose backup for loop closure validation (prevents 95km jumps)
+    std::map<int, Sophus::SE3d> original_poses_;
 };
