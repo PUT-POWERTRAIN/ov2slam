@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <vector>
 #include <memory>
+#include <mutex>
 
 // /////////////////////////////////////////////////////////////////////////////
 // ROS STUBS - Minimal replacements for ROS types
@@ -181,6 +182,7 @@ public:
     }
 
     void pubVO(const Sophus::SE3d& Twc, const double time) {
+        std::lock_guard<std::mutex> lock(traj_mutex_);
         if (traj_file_.is_open()) {
             const Eigen::Vector3d t = Twc.translation();
             const Eigen::Quaterniond q = Twc.unit_quaternion();
@@ -205,6 +207,7 @@ public:
     }
 
     void addKFsTraj(const Sophus::SE3d& Twc) {
+        std::lock_guard<std::mutex> lock(kfs_traj_mutex_);
         if (kfs_traj_file_.is_open()) {
             const Eigen::Vector3d t = Twc.translation();
             const Eigen::Quaterniond q = Twc.unit_quaternion();
@@ -219,10 +222,12 @@ public:
     }
 
     void pubKFsTraj(const double time) {
+        std::lock_guard<std::mutex> lock(kfs_traj_mutex_);
         kfs_traj_file_.flush();
     }
 
     void pubFinalKFsTraj(const Sophus::SE3d& Twc, const double time) {
+        std::lock_guard<std::mutex> lock(full_traj_mutex_);
         if (full_traj_file_.is_open()) {
             const Eigen::Vector3d t = Twc.translation();
             const Eigen::Quaterniond q = Twc.unit_quaternion();
@@ -254,5 +259,8 @@ private:
     std::ofstream traj_file_;
     std::ofstream kfs_traj_file_;
     std::ofstream full_traj_file_;
+    std::mutex traj_mutex_;       // Protects traj_file_ writes
+    std::mutex kfs_traj_mutex_;   // Protects kfs_traj_file_ writes
+    std::mutex full_traj_mutex_;  // Protects full_traj_file_ writes
 };
 #endif // ROS_VISUALIZER_HPP
