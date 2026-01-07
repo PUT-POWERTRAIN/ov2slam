@@ -541,6 +541,17 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
             pcurframe_->setVelocity(v_gps);
             motion_model_.updateMotionModelVelocity(v_gps, true);
         }
+    } else if( use_gps_mode && gt_loader_ && motion_model_.prev_time_ < 0 ) {
+        // First frame special case: GPS mode requested but can't be applied
+        // GPS velocity requires previous frame: v = (p_cur - p_prev) / dt
+        // Fall back to Vision mode for first frame
+        if( pslamstate_->debug_ ) {
+            std::cout << "[FIRST_FRAME] GPS mode requested but cannot be applied "
+                      << "(prev_time=" << motion_model_.prev_time_ << "), "
+                      << "using VISION mode for initialization\n";
+        }
+        // use_gps_mode stays true, but GPS application skipped
+        // Vision mode block below will handle velocity computation
     } else {
         // Vision mode: Use PnP pose with velocity correction
         if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
