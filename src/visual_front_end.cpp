@@ -477,21 +477,38 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
             }
         } else {
             // Currently in GPS mode
-            if( inliers >= pslamstate_->min_inliers_vision_ ) {
-                // Good tracking recovered: Switch to VISION after hysteresis
-                nav_mode_counter_++;
-                if( nav_mode_counter_ >= pslamstate_->hysteresis_frames_ ) {
-                    std::cout << "[VALIDATION] Switching GPS -> VISION (inliers=" << inliers
-                              << " >= " << pslamstate_->min_inliers_vision_ << " for "
-                              << nav_mode_counter_ << " frames)" << std::endl;
-                    nav_mode_ = NavMode::VISION;
-                    nav_mode_counter_ = 0;
-                    use_gps_mode = false;
-                }
-            } else {
-                // Still poor tracking: Stay in GPS mode
+            // FIRST: Check GPS availability BEFORE staying in GPS mode
+            bool gps_available = true;
+            if( gt_loader_ ) {
+                Eigen::Vector3d dummy_pos;
+                Eigen::Quaterniond dummy_q;
+                gps_available = gt_loader_->getPoseAt(time, dummy_pos, dummy_q);
+            }
+
+            if( !gps_available ) {
+                // GPS dropout - EMERGENCY switch to VISION mode
+                std::cout << "[GPS_DROPOUT] GPS unavailable at t=" << time << ", switching to VISION mode\n";
+                nav_mode_ = NavMode::VISION;
                 nav_mode_counter_ = 0;
-                use_gps_mode = true;
+                use_gps_mode = false;
+            } else {
+                // GPS available - continue with existing hysteresis logic
+                if( inliers >= pslamstate_->min_inliers_vision_ ) {
+                    // Good tracking recovered: Switch to VISION after hysteresis
+                    nav_mode_counter_++;
+                    if( nav_mode_counter_ >= pslamstate_->hysteresis_frames_ ) {
+                        std::cout << "[VALIDATION] Switching GPS -> VISION (inliers=" << inliers
+                                  << " >= " << pslamstate_->min_inliers_vision_ << " for "
+                                  << nav_mode_counter_ << " frames)" << std::endl;
+                        nav_mode_ = NavMode::VISION;
+                        nav_mode_counter_ = 0;
+                        use_gps_mode = false;
+                    }
+                } else {
+                    // Still poor tracking: Stay in GPS mode
+                    nav_mode_counter_ = 0;
+                    use_gps_mode = true;
+                }
             }
         }
 
