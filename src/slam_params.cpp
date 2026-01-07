@@ -54,6 +54,31 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
         min_inliers_gps_ = static_cast<int>(validationNode["min_inliers_gps"]);
         hysteresis_frames_ = static_cast<int>(validationNode["hysteresis_frames"]);
 
+        // VALIDATE threshold invariant BEFORE logging
+        // Bug #3 fix: Prevent inverted thresholds where vision <= gps
+        if( validation_enable_ && min_inliers_vision_ <= min_inliers_gps_ ) {
+            std::cerr << "\n[SlamParams] ERROR: Invalid validation thresholds!\n"
+                      << "  min_inliers_vision (" << min_inliers_vision_ << ") must be > "
+                      << "min_inliers_gps (" << min_inliers_gps_ << ")\n"
+                      << "  Auto-fixing to safe defaults: vision=80, gps=50\n";
+
+            // Use documented defaults (same as defaults when node not found)
+            min_inliers_vision_ = 80;
+            min_inliers_gps_ = 50;
+        }
+
+        // Additional sanity checks for out-of-range values
+        if( validation_enable_ ) {
+            if( min_inliers_vision_ < 50 || min_inliers_vision_ > 500 ) {
+                std::cerr << "[SlamParams] WARNING: min_inliers_vision=" << min_inliers_vision_
+                          << " out of reasonable range [50, 500]\n";
+            }
+            if( min_inliers_gps_ < 20 || min_inliers_gps_ > 300 ) {
+                std::cerr << "[SlamParams] WARNING: min_inliers_gps=" << min_inliers_gps_
+                          << " out of reasonable range [20, 300]\n";
+            }
+        }
+
         std::cout << "\nValidation Layer: " << (validation_enable_ ? "ENABLED" : "DISABLED") << "\n";
         std::cout << "  Thresholds: Vision >= " << min_inliers_vision_
                   << " inliers, GPS < " << min_inliers_gps_ << " inliers\n";
