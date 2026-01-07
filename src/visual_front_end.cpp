@@ -304,6 +304,9 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
     if( pslamstate_->debug_ )
         std::cout << "\n\n - [Visual-Front-End]: Track Stereo Image\n";
 
+    // Reset validation metric at frame start (prevents stale data from 10+ frames ago)
+    last_nbinliers_ = 0;
+
     if( pslamstate_->debug_ || pslamstate_->log_timings_ )
         Profiler::Start("1.FE_Track-Stereo");
 
