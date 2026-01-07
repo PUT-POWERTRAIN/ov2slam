@@ -34,6 +34,38 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
     debug_ = static_cast<int>(fsSettings["debug"]);;
     log_timings_ = static_cast<int>(fsSettings["log_timings"]);;
 
+    // Read Test parameters if available
+    std::cout << "[DEBUG] Checking for Test node in YAML...\n" << std::flush;
+    cv::FileNode testNode = fsSettings["Test"];
+    std::cout << "[DEBUG] testNode.empty() = " << testNode.empty() << "\n" << std::flush;
+    if( !testNode.empty() ) {
+        imu_only_mode_ = static_cast<int>(testNode["imu_only_mode"]);
+        std::cout << "IMU-only mode: " << (imu_only_mode_ ? "ENABLED" : "DISABLED") << "\n" << std::flush;
+    } else {
+        imu_only_mode_ = 0;
+        std::cout << "[DEBUG] Test node not found, using default imu_only_mode=0\n" << std::flush;
+    }
+
+    // Read Validation parameters if available
+    cv::FileNode validationNode = fsSettings["Validation"];
+    if( !validationNode.empty() ) {
+        validation_enable_ = static_cast<int>(validationNode["enable"]);
+        min_inliers_vision_ = static_cast<int>(validationNode["min_inliers_vision"]);
+        min_inliers_gps_ = static_cast<int>(validationNode["min_inliers_gps"]);
+        hysteresis_frames_ = static_cast<int>(validationNode["hysteresis_frames"]);
+
+        std::cout << "\nValidation Layer: " << (validation_enable_ ? "ENABLED" : "DISABLED") << "\n";
+        std::cout << "  Thresholds: Vision >= " << min_inliers_vision_
+                  << " inliers, GPS < " << min_inliers_gps_ << " inliers\n";
+        std::cout << "  Hysteresis: " << hysteresis_frames_ << " frames\n" << std::flush;
+    } else {
+        validation_enable_ = 0;
+        min_inliers_vision_ = 80;
+        min_inliers_gps_ = 50;
+        hysteresis_frames_ = 30;
+        std::cout << "[DEBUG] Validation node not found, using defaults (disabled)\n" << std::flush;
+    }
+
     mono_ =  static_cast<int>(fsSettings["mono"]);
     stereo_ = static_cast<int>(fsSettings["stereo"]);
 

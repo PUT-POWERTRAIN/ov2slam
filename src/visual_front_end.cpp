@@ -229,25 +229,36 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     }
 
     // Compute Pose (2D-3D)
-    computePose();
+    if( !pslamstate_->imu_only_mode_ ) {
+        computePose(); // Normal mode: PnP estimation
+    } else {
+        std::cout << "[IMU_ONLY] Skipping PnP, using IMU prediction only\n";
+        // IMU prediction already done (lines 105-184)
+        // Keep predicted pose, don't compute PnP
+    }
 
     // CORRECT velocity from visual pose estimate (fixes IMU drift)
     // WITHOUT THIS: velocity accumulates IMU bias errors and explodes to 50 m/s
     // Must compute BEFORE updateMotionModel() which overwrites prev_time_
-    if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
-        Eigen::Vector3d p_cur = pcurframe_->getTwc().translation();
-        Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
-        double dt = time - motion_model_.prev_time_;
-        Eigen::Vector3d v_visual = (p_cur - p_prev) / dt;
-        pcurframe_->setVelocity(v_visual);
+    // SKIP in IMU-only mode to preserve IMU velocity
+    if( !pslamstate_->imu_only_mode_ ) {
+        if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
+            Eigen::Vector3d p_cur = pcurframe_->getTwc().translation();
+            Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
+            double dt = time - motion_model_.prev_time_;
+            Eigen::Vector3d v_visual = (p_cur - p_prev) / dt;
+            pcurframe_->setVelocity(v_visual);
 
-        std::cout << "[VELOCITY_CORRECTION] frame=" << pcurframe_->id_
-                  << " v_visual=" << v_visual.transpose()
-                  << " dt=" << dt << " s" << std::endl;
+            std::cout << "[VELOCITY_CORRECTION] frame=" << pcurframe_->id_
+                      << " v_visual=" << v_visual.transpose()
+                      << " dt=" << dt << " s" << std::endl;
+        } else {
+            std::cout << "[VELOCITY_CORRECTION] SKIP frame=" << pcurframe_->id_
+                      << " prev_time=" << motion_model_.prev_time_
+                      << " time=" << time << std::endl;
+        }
     } else {
-        std::cout << "[VELOCITY_CORRECTION] SKIP frame=" << pcurframe_->id_
-                  << " prev_time=" << motion_model_.prev_time_
-                  << " time=" << time << std::endl;
+        std::cout << "[IMU_ONLY] Using IMU velocity only, no visual correction\n";
     }
 
     // Update Motion model from estimated pose (must be AFTER velocity correction!)
@@ -335,19 +346,27 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
 
     // 4. Apply Motion Model (same as mono tracking)
     if( motion_model_.prev_time_ < 0 ) {
-        // First frame - initialize velocity to zero
+        // First frame - initialize velocity to zero in BOTH frame AND motion model
         pcurframe_->setVelocity(Eigen::Vector3d::Zero());
+        motion_model_.updateMotionModelVelocity(Eigen::Vector3d::Zero(), true);  // CRITICAL for IMU prediction
     }
 
     Sophus::SE3d Twc = pcurframe_->getTwc();
 
     // Try IMU-based prediction first, fallback to constant velocity
+    std::cout << "[DEBUG_STEREO] frame=" << pcurframe_->id_
+              << " prev_time=" << motion_model_.prev_time_
+              << " has_vel=" << motion_model_.has_prev_velocity_
+              << " gt_loader=" << (gt_loader_ != nullptr) << std::endl;
+
     if( motion_model_.prev_time_ >= 0 && gt_loader_ && motion_model_.has_prev_velocity_ ) {
         double t_prev = motion_model_.prev_time_;
         double t_cur = time;
 
         std::vector<GTLoader::AHRSPose> imu_data =
             gt_loader_->getIMUData(t_prev, t_cur);
+
+        std::cout << "[DEBUG_STEREO] IMU data: " << imu_data.size() << " measurements" << std::endl;
 
         if( !imu_data.empty() ) {
             ov2slam::IMUPreintegration::Bias bias;
@@ -389,6 +408,9 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
             pcurframe_->setTwc(Twc);
             pcurframe_->setVelocity(v_pred);
 
+            // CRITICAL: Update motion model velocity for next frame's prediction
+            motion_model_.updateMotionModelVelocity(v_pred, true);
+
             if( pslamstate_->debug_ ) {
                 std::cout << "[IMU_PRED] frame=" << pcurframe_->id_
                           << " dt=" << dt
@@ -397,10 +419,12 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
                           << " v_pred=" << v_pred.norm() << std::endl;
             }
         } else {
+            std::cout << "[DEBUG_STEREO] No IMU data - using applyMotionModel" << std::endl;
             motion_model_.applyMotionModel(Twc, time);
             pcurframe_->setTwc(Twc);
         }
     } else {
+        std::cout << "[DEBUG_STEREO] Condition failed - using applyMotionModel" << std::endl;
         motion_model_.applyMotionModel(Twc, time);
         pcurframe_->setTwc(Twc);
     }
@@ -410,15 +434,102 @@ bool VisualFrontEnd::trackStereo(cv::Mat &iml, cv::Mat &imr, double time)
     // The mapper will automatically match left↔right features and triangulate 3D points
 
     // 5. Compute Pose (PnP with stereo + temporal features)
-    computePose();
+    // Always run PnP unless in IMU-only mode (needed for inliers count)
+    if( !pslamstate_->imu_only_mode_ ) {
+        computePose(); // Normal mode: PnP estimation
+    } else {
+        std::cout << "[IMU_ONLY] Skipping PnP, using IMU prediction only (stereo)\n";
+        // IMU prediction already done, keep predicted pose
+    }
 
-    // 6. Velocity correction from visual pose estimate
-    if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
-        Eigen::Vector3d p_cur = pcurframe_->getTwc().translation();
-        Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
-        double dt = time - motion_model_.prev_time_;
-        Eigen::Vector3d v_visual = (p_cur - p_prev) / dt;
-        pcurframe_->setVelocity(v_visual);
+    // 6. Validation Layer: Hybrid Vision + GPS dead reckoning
+    // Decide between Vision (docking) and GPS (transit) based on PnP quality
+    bool use_gps_mode = false;
+
+    if( pslamstate_->imu_only_mode_ ) {
+        // IMU-only mode: Always use GPS
+        use_gps_mode = true;
+    }
+    else if( pslamstate_->validation_enable_ ) {
+        // Validation layer enabled: Automatic switching based on inliers
+        int inliers = last_nbinliers_;
+
+        // State machine with hysteresis
+        if( nav_mode_ == NavMode::VISION ) {
+            // Currently in VISION mode
+            if( inliers < pslamstate_->min_inliers_gps_ ) {
+                // Poor tracking: Switch to GPS after hysteresis
+                nav_mode_counter_++;
+                if( nav_mode_counter_ >= pslamstate_->hysteresis_frames_ ) {
+                    std::cout << "[VALIDATION] Switching VISION -> GPS (inliers=" << inliers
+                              << " < " << pslamstate_->min_inliers_gps_ << " for "
+                              << nav_mode_counter_ << " frames)" << std::endl;
+                    nav_mode_ = NavMode::GPS;
+                    nav_mode_counter_ = 0;
+                    use_gps_mode = true;
+                }
+            } else {
+                // Good tracking: Stay in VISION mode
+                nav_mode_counter_ = 0;
+            }
+        } else {
+            // Currently in GPS mode
+            if( inliers >= pslamstate_->min_inliers_vision_ ) {
+                // Good tracking recovered: Switch to VISION after hysteresis
+                nav_mode_counter_++;
+                if( nav_mode_counter_ >= pslamstate_->hysteresis_frames_ ) {
+                    std::cout << "[VALIDATION] Switching GPS -> VISION (inliers=" << inliers
+                              << " >= " << pslamstate_->min_inliers_vision_ << " for "
+                              << nav_mode_counter_ << " frames)" << std::endl;
+                    nav_mode_ = NavMode::VISION;
+                    nav_mode_counter_ = 0;
+                    use_gps_mode = false;
+                }
+            } else {
+                // Still poor tracking: Stay in GPS mode
+                nav_mode_counter_ = 0;
+                use_gps_mode = true;
+            }
+        }
+
+        // Log current mode
+        if( nav_mode_ == NavMode::VISION ) {
+            std::cout << "[VALIDATION] VISION mode (inliers=" << inliers << ")" << std::endl;
+        } else {
+            std::cout << "[VALIDATION] GPS mode (inliers=" << inliers << ")" << std::endl;
+        }
+    }
+
+    // 7. Apply pose based on mode
+    if( use_gps_mode && gt_loader_ && motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
+        // GPS mode: Use GPS position + velocity
+        Eigen::Vector3d p_gps_cur;
+        Eigen::Quaterniond q_gps_dummy;
+
+        if( gt_loader_->getPoseAt(time, p_gps_cur, q_gps_dummy) ) {
+            // Compute GPS velocity
+            Eigen::Vector3d p_gps_prev;
+            Eigen::Quaterniond q_dummy2;
+            gt_loader_->getPoseAt(motion_model_.prev_time_, p_gps_prev, q_dummy2);
+
+            double dt = time - motion_model_.prev_time_;
+            Eigen::Vector3d v_gps = (p_gps_cur - p_gps_prev) / dt;
+
+            // Use GPS position for translation, keep IMU rotation
+            Twc.translation() = p_gps_cur;
+            pcurframe_->setTwc(Twc);
+            pcurframe_->setVelocity(v_gps);
+            motion_model_.updateMotionModelVelocity(v_gps, true);
+        }
+    } else {
+        // Vision mode: Use PnP pose with velocity correction
+        if( motion_model_.prev_time_ > 0 && time > motion_model_.prev_time_ ) {
+            Eigen::Vector3d p_cur = pcurframe_->getTwc().translation();
+            Eigen::Vector3d p_prev = motion_model_.prevTwc_.translation();
+            double dt = time - motion_model_.prev_time_;
+            Eigen::Vector3d v_visual = (p_cur - p_prev) / dt;
+            pcurframe_->setVelocity(v_visual);
+        }
     }
 
     // Update motion model from estimated pose (must be AFTER velocity correction)
@@ -1064,6 +1175,7 @@ void VisualFrontEnd::computePose()
 
         // Check that pose estim. was good enough
         size_t nbinliers = vwpts.size() - voutliersidx.size();
+        last_nbinliers_ = nbinliers;  // Store for validation layer
 
         if( !success
             || nbinliers < 5
@@ -1120,6 +1232,7 @@ void VisualFrontEnd::computePose()
     
     // Check that pose estim. was good enough
     size_t nbinliers = vwpts.size() - voutliersidx.size();
+    last_nbinliers_ = nbinliers;  // Store for validation layer
 
     if( pslamstate_->debug_ )
         std::cout << "\n \t>>> Ceres PnP nb outliers : " << voutliersidx.size();

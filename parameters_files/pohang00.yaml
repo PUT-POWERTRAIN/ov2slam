@@ -178,3 +178,38 @@ LoopClosure.max_loop_closure_displacement: 100.0
 # Enable/disable the displacement validation check
 # Set to 0 to disable (not recommended - can cause extreme trajectory jumps)
 LoopClosure.enable_loop_displacement_check: 1
+
+#--------------------------------------------------------------------------------------------
+# Testing: IMU-Only Dead Reckoning
+#--------------------------------------------------------------------------------------------
+# IMU-only mode for testing dead reckoning without vision
+# Set to 1 to disable PnP pose estimation and use only GPS + IMU orientation
+# Set to 0 for normal Vision + IMU mode
+Test:
+  imu_only_mode: 0
+
+#--------------------------------------------------------------------------------------------
+# Validation Layer: Hybrid Vision + GPS Dead Reckoning
+#--------------------------------------------------------------------------------------------
+# Automatically switches between Vision (docking) and GPS (transit) based on PnP quality
+#
+# THRESHOLDS:
+# - min_inliers_vision: Minimum inliers to use Vision mode (default: 80)
+# - min_inliers_gps: Below this inliers, switch to GPS (default: 50)
+#
+# HYSTERESIS:
+# - hysteresis_frames: Number of frames to wait before switching (default: 30)
+#   Prevents flickering between modes during transient conditions
+#
+# MODES:
+# - Vision mode: Use PnP pose estimation for docking (relative localization)
+# - GPS mode: Use GPS dead reckoning for transit (absolute positioning)
+#
+# USAGE:
+# - Set validation_enable: 1 to activate automatic switching
+# - Set validation_enable: 0 to force normal vision mode (no switching)
+Validation:
+  enable: 1                    # Enable validation layer
+  min_inliers_vision: 80        # Use vision if inliers >= this
+  min_inliers_gps: 50           # Switch to GPS if inliers < this
+  hysteresis_frames: 30         # Frames to wait before switching mode

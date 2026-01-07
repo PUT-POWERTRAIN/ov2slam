@@ -162,6 +162,15 @@ public:
 
     MotionModel motion_model_;
 
+    // Validation layer: Hybrid Vision + GPS state machine
+    enum class NavMode {
+        VISION,  // Use PnP pose estimation (docking mode)
+        GPS      // Use GPS dead reckoning (transit mode)
+    };
+    NavMode nav_mode_ = NavMode::VISION;
+    int nav_mode_counter_ = 0;  // Hysteresis counter
+    size_t last_nbinliers_ = 0;  // Last PnP inliers count (for validation)
+
     bool bp3preq_ = false;
 
     // Keyframe watchdog: track time of last keyframe (Faza 3)

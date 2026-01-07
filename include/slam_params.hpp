@@ -85,6 +85,13 @@ public:
 
     // SLAM settings
     bool debug_, log_timings_;
+    bool imu_only_mode_;  // IMU-only test mode (disables PnP)
+
+    // Validation layer: Hybrid Vision + GPS dead reckoning
+    bool validation_enable_;        // Enable validation layer
+    int min_inliers_vision_;        // Min inliers to use Vision mode
+    int min_inliers_gps_;           // Switch to GPS if inliers < this
+    int hysteresis_frames_;         // Frames to wait before switching
 
     bool mono_, stereo_;
 
